@@ -1,0 +1,19 @@
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Local configuration and editor files
+.env
+.env.*
+.vscode/
+.idea/
+
+# Operating-system files
+.DS_Store
+Thumbs.db
