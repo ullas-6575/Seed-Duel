@@ -25,7 +25,7 @@ Use `2 * pits_per_player * initial_seeds_per_pit` for the initial seed total. Co
 6. If it is empty, capture from the following eligible normal pit, then end the turn.
 7. Captured seeds go into the current player's captured account, not their hand.
 
-When capture's normal target is itself empty, the historical discussion did not settle whether to capture zero or search farther. Decision D01 below must settle this. Never silently skip ordinary empty capture targets.
+If the normal capture target is empty, the current player's turn ends immediately and 0 seeds are added to that player's captured account. Do not search farther for another capture target.
 
 ## 3. Agreed conquered-pit behavior
 
@@ -51,11 +51,11 @@ Check a complete checkpoint immediately before each pickup, with hand = 0. If th
 
 Use board counts, position/next pickup, phase, player and rule-relevant state. A matching board alone is not sufficient. Reset turn-local repetition history at a new turn.
 
-### Later rounds
+### Later rounds — provisional policy, not yet finalized
 
-A repeated state under a particular Drop/Skip policy does **not** prove a forced loop. The verified 28-batch fixture in file 06 has a terminating alternative. Later-round forced-loop termination and handling of deliberate repeated choices remain a policy decision, D06.
+A repeated state under a particular Drop/Skip policy does **not** prove that every available choice loops. The proposed approach is to detect repetition on the actual chosen path and end the **current turn only**, without automatically ending the whole round. The round then continues with the next player. AI search should consider alternative Drop/Skip choices so it can avoid a voluntary loop where possible.
 
-A computation limit may pause analysis and return `UNKNOWN` or a diagnostic. It is not evidence of a forced loop and must not silently award a winner.
+The user has said this proposal looks good, but D06 is explicitly **not finalized**. A computation limit may pause analysis and return `UNKNOWN` or a diagnostic. It is not evidence of a forced loop and must not silently award a winner.
 
 ## 5. Settlement and conservation
 
@@ -87,36 +87,46 @@ These are valid examples, not a complete general later-round algorithm.
 | Carry reserve | 4 | 0 |
 | Ownership | 5 original pits + 1 conquered pit | 4 pits |
 
-The conquered pit starts empty: 36 board seeds + 4 reserve = 40. The example chooses display pit 6 as the unfilled pit for illustration; the general pit selection rule is D02.
+The conquered pit starts empty: 36 board seeds + 4 reserve = 40. Pits are refilled in the agreed distribution order. Any pit that cannot be filled is locked/conquered one by one, proceeding from the applicable side. The precise traversal/side-priority for all board layouts still needs a worked example before implementation.
 
 The earlier 7 × 5 example follows the same reasoning: 42/28, donate 2, refill 35/30, reserve 5/0, conquer one pit, 65 board + 5 reserve = 70.
 
 Reserve persists: if Round 2 allocates 36 active seeds and P1 has 4 reserved, then round earnings 18/18 lead to available funds 22/18. Reserve is not an optional bonus created at settlement.
 
-## 7. Victory and mode boundaries
+## 7. Victory, round order and mode boundaries
 
-Full-game victory: a player conquers all original opponent pits. A player leading in seeds after one round has not automatically won the full game.
+- **Full-game victory:** a player wins by conquering all original pits of the opponent. Winning one round by seeds alone does not win the full game.
+- **Initial-round starter:** Player 1 starts the initial demo round.
+- **Next-round starter:** the player who moved second in the previous round starts the next round (alternating starter).
+- **One-round mode:** after settlement, compare each player's final seed total. The higher total wins; equal totals mean a draw.
+- **Recapture:** conquered pits may be reclaimed in a later round (D03 = A). The exact setup mechanism by which a reclaimed pit is refilled and ownership changes must follow the finalized redistribution algorithm.
+- **Existing conquered pits:** they remain conquered and locked in subsequent round setups (D04 = A), unless and until reclaimed under the recapture rule. They remain protected during play. The exact interaction between the locked-pit setup rule and recapture needs a concrete worked example before coding.
 
-Proposed core-mode result: compare final round seed totals; equal totals are a draw. Confirm D07 before release.
+## 8. Donation and redistribution decisions
 
-The general relationship between existing conquered territory, refilling, lost territory and possible reclamation must be resolved before the full-game mode is enabled.
+- If one player is stronger by round earnings, that player donates their **entire remainder** after filling as many of their own pits as possible: `remainder = available_seeds % seeds_per_pit`.
+- Add the donation to the weaker player's available seeds before filling their pits.
+- If the weaker player still cannot fill a pit, the unfilled pit is locked/conquered one by one according to the agreed distribution order.
+- Any seeds left with the stronger player after donation are carried as that player's reserve into the next round.
+- If round earnings are equal, neither player is designated stronger; no donation is made. Remaining seeds stay with their respective players as reserve, subject to seed conservation.
+- The exact traversal order for selecting unfilled pits, and the interaction with already-conquered pits/recapture, still needs a worked example.
 
-## 8. Decisions to record together
+## 9. Decision status register
 
-| ID | Decision | Proposed starting point / constraint | Blocks |
+| ID | Decision | Status / accepted behavior | Blocks / notes |
 | --- | --- | --- | --- |
-| D01 | Normal capture target empty | Recommend capture zero and end turn; not yet confirmed | Core capture edge case |
-| D02 | Which pits refill or become conquered? | Select a deterministic order or explicit player choice | Redistribution |
-| D03 | Can conquered pits be reclaimed? | No assumed answer | Full-game transitions |
-| D04 | How does setup work with existing conquests on either side? | Specify exact priority, costs, protection lifetime and ownership updates | Full-game match |
-| D05 | First player and next-round starter | Recommend fixed P1 in demos; fair alternation in experiments | Play/reproducibility |
-| D06 | Later forced loops, voluntary looping, whole-match repetition | Specify separate outcomes; resource limits are not proofs | Full-game termination |
-| D07 | Standalone result and draws | Recommend final seed total; tie = draw | Core result screen |
-| D08 | Donation generalization and setup ties | Validate formula for all admitted states; preserve every seed | Full-game setup |
+| D01 | Normal capture target empty | **AGREED:** current player's turn ends; add 0 captured seeds | Add empty-target test |
+| D02 | Which pits refill or become conquered? | **PARTLY AGREED:** refill in distribution order; unfilled pits are locked/conquered one by one from the applicable side | Exact side/traversal priority needs a worked example |
+| D03 | Can conquered pits be reclaimed? | **AGREED: YES** | Recapture mechanism must be specified alongside setup |
+| D04 | Existing conquered pits in later setup | **AGREED:** remain conquered and locked | Reconcile with D03 recapture through an explicit example |
+| D05 | Initial and next-round starter | **AGREED:** Player 1 starts the initial demo; the previous round's second player starts the next round | Test initial starter and alternation over several rounds |
+| D06 | Later-round cycle handling | **PROVISIONAL:** repeated actual path ends current turn only; round continues; AI should consider alternative choices | User likes proposal but will finalize later; do not treat as final rule |
+| D07 | One-round winner and draw | **AGREED:** after settlement, higher final seed total wins; equal totals = draw | Result-screen settlement test |
+| D08 | Donation and redistribution | **AGREED:** stronger player donates entire remainder; if weaker still cannot fill a pit, it is conquered; equal earnings means no stronger player/no donation | Need edge-case examples and exact pit order |
 
-For each accepted decision record: chosen rule, example, both reviewers, date, affected tests and new `rule_version`. Until then, label the relevant mode provisional or unavailable. Do not interpret this guide's recommendations as already approved childhood rules.
+For each accepted decision record: chosen rule, example, both reviewers, date, affected tests and new `rule_version`. Until then, label unresolved mechanics provisional or unavailable. Do not interpret recommendations as agreed rules unless marked **AGREED**.
 
-## 9. Decision record template
+## 10. Decision record template
 
 ```text
 ID:
