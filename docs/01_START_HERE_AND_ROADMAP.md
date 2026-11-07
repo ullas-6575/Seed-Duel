@@ -86,8 +86,10 @@ Do not start networking, accounts, online multiplayer, mobile packaging or a dat
 
 | Milestone | Status | Owner | Evidence / remaining blocker |
 | --- | --- | --- | --- |
-| M0 | Not assessed | Both | Fill after first meeting |
-| M1–M4 | Not assessed | Both | Core implementation |
+| M0 | Done | Both | Core decisions recorded in `docs/02_RULES_AND_DECISIONS.md` |
+| M1 | In progress | Feroz | Headless Round-1 engine, T01/T03 and conservation tests in `ec46d9d`; add cycle-fixture coverage next |
+| M2 | In progress | Both | Clickable Pygame board on `ui/board-renderer`; event feed is connected, timed animation remains |
+| M3–M4 | Not started | Both | AI and core-release work |
 | M5–M7 | Not assessed | Both | Full-game implementation |
 
 Allowed statuses: Not started, In progress, Blocked, In review, Done. Mark Done only when the milestone's exit evidence exists.
