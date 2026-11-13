@@ -63,6 +63,8 @@ class SeedDuelApp:
         self.advice: Recommendation | None = recommend_move(self.state)
         self.game_started = False
         self.menu_page = "mode"
+        self.menu_history: list[str] = []
+        self.previous_menu_page = "mode"
         self.ai_level: str | None = None
         self.events: list[Event] = []
         self.animation_steps: list[AnimationStep] = []
@@ -78,6 +80,8 @@ class SeedDuelApp:
         self.medium_rect = pygame.Rect(300, 345, 500, 65)
         self.hard_rect = pygame.Rect(300, 430, 500, 65)
         self.back_rect = pygame.Rect(300, 515, 500, 50)
+        self.back_game_rect = pygame.Rect(650, 29, 85, 42)
+        self.resign_rect = pygame.Rect(743, 29, 145, 42)
         self.restart_rect = pygame.Rect(896, 29, 160, 42)
         self.settle_rect = pygame.Rect(863, 620, 193, 42)
 
@@ -116,9 +120,9 @@ class SeedDuelApp:
             if key == pygame.K_1:
                 self._start_game()
             elif key == pygame.K_2:
-                self.menu_page = "level"
+                self._open_menu_page("level")
         elif key == pygame.K_ESCAPE or key == pygame.K_0:
-            self.menu_page = "mode"
+            self._go_back()
         elif key in (pygame.K_1, pygame.K_2, pygame.K_3):
             self._start_game(("easy", "medium", "hard")[key - pygame.K_1])
 
@@ -127,9 +131,9 @@ class SeedDuelApp:
             if self.two_player_rect.collidepoint(pos):
                 self._start_game()
             elif self.ai_opponent_rect.collidepoint(pos):
-                self.menu_page = "level"
+                self._open_menu_page("level")
         elif self.back_rect.collidepoint(pos):
-            self.menu_page = "mode"
+            self._go_back()
         elif self.easy_rect.collidepoint(pos):
             self._start_game("easy")
         elif self.medium_rect.collidepoint(pos):
@@ -137,7 +141,16 @@ class SeedDuelApp:
         elif self.hard_rect.collidepoint(pos):
             self._start_game("hard")
 
+    def _open_menu_page(self, page: str) -> None:
+        self.menu_history.append(self.menu_page)
+        self.menu_page = page
+
+    def _go_back(self) -> None:
+        if self.menu_history:
+            self.menu_page = self.menu_history.pop()
+
     def _start_game(self, ai_level: str | None = None) -> None:
+        self.previous_menu_page = self.menu_page
         self.ai_level = ai_level
         self.game_started = True
         self.state = initial_state()
@@ -148,12 +161,31 @@ class SeedDuelApp:
         self.current_step = None
         self.message = "Player 1: choose a highlighted pit."
 
+    def _return_to_menu(self, page: str, clear_history: bool = False) -> None:
+        self.game_started = False
+        self.menu_page = page
+        self.ai_level = None
+        if clear_history:
+            self.menu_history.clear()
+        self.state = initial_state()
+        self.display_state = self.state
+        self.advice = recommend_move(self.state)
+        self.events = []
+        self.animation_steps = []
+        self.current_step = None
+
     def _handle_click(self, pos: tuple[int, int]) -> None:
         if not self.game_started:
             self._handle_menu_click(pos)
             return
         if self.restart_rect.collidepoint(pos):
             self._start_game(self.ai_level)
+            return
+        if self.back_game_rect.collidepoint(pos):
+            self._return_to_menu(self.previous_menu_page)
+            return
+        if self.resign_rect.collidepoint(pos):
+            self._return_to_menu("mode", clear_history=True)
             return
         if self.current_step or self.animation_steps:
             return
@@ -296,6 +328,10 @@ class SeedDuelApp:
     def _draw_header(self) -> None:
         self.screen.blit(self.title_font.render("SEED DUEL", True, BROWN), (42, 28))
         self.screen.blit(self.small_font.render("Round 1 • Relay sowing and capture", True, MUTED), (44, 69))
+        pygame.draw.rect(self.screen, BROWN, self.back_game_rect, border_radius=10)
+        self._center_text("Back", self.back_game_rect, self.small_font, PANEL)
+        pygame.draw.rect(self.screen, RED, self.resign_rect, border_radius=10)
+        self._center_text("Resign & Leave", self.resign_rect, self.small_font, PANEL)
         pygame.draw.rect(self.screen, BROWN, self.restart_rect, border_radius=10)
         self._center_text("Restart", self.restart_rect, self.font, PANEL)
 
