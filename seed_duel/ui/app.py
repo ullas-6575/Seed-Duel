@@ -9,6 +9,8 @@ import pygame
 
 from seed_duel.model import Event, GameState, Phase
 from seed_duel.rules import apply_select_pit, initial_state, legal_actions, settle_round
+from seed_duel.ai.greedy import choose_move as choose_greedy_move
+from seed_duel.ai.mcts import recommend_move as recommend_mcts_move
 from seed_duel.ai.minimax import Recommendation, recommend_move
 
 
@@ -59,6 +61,9 @@ class SeedDuelApp:
         self.state = initial_state()
         self.display_state = self.state
         self.advice: Recommendation | None = recommend_move(self.state)
+        self.game_started = False
+        self.menu_page = "mode"
+        self.ai_level: str | None = None
         self.events: list[Event] = []
         self.animation_steps: list[AnimationStep] = []
         self.current_step: AnimationStep | None = None
@@ -67,6 +72,12 @@ class SeedDuelApp:
         self.message = "Player 1: choose a highlighted pit."
         self.running = True
         self.pits = self._make_pit_views()
+        self.two_player_rect = pygame.Rect(300, 300, 500, 70)
+        self.ai_opponent_rect = pygame.Rect(300, 390, 500, 70)
+        self.easy_rect = pygame.Rect(300, 260, 500, 65)
+        self.medium_rect = pygame.Rect(300, 345, 500, 65)
+        self.hard_rect = pygame.Rect(300, 430, 500, 65)
+        self.back_rect = pygame.Rect(300, 515, 500, 50)
         self.restart_rect = pygame.Rect(896, 29, 160, 42)
         self.settle_rect = pygame.Rect(863, 620, 193, 42)
 
@@ -95,18 +106,54 @@ class SeedDuelApp:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
+            elif event.type == pygame.KEYDOWN and not self.game_started:
+                self._handle_menu_key(event.key)
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 self._handle_click(event.pos)
 
+    def _handle_menu_key(self, key: int) -> None:
+        if self.menu_page == "mode":
+            if key == pygame.K_1:
+                self._start_game()
+            elif key == pygame.K_2:
+                self.menu_page = "level"
+        elif key == pygame.K_ESCAPE or key == pygame.K_0:
+            self.menu_page = "mode"
+        elif key in (pygame.K_1, pygame.K_2, pygame.K_3):
+            self._start_game(("easy", "medium", "hard")[key - pygame.K_1])
+
+    def _handle_menu_click(self, pos: tuple[int, int]) -> None:
+        if self.menu_page == "mode":
+            if self.two_player_rect.collidepoint(pos):
+                self._start_game()
+            elif self.ai_opponent_rect.collidepoint(pos):
+                self.menu_page = "level"
+        elif self.back_rect.collidepoint(pos):
+            self.menu_page = "mode"
+        elif self.easy_rect.collidepoint(pos):
+            self._start_game("easy")
+        elif self.medium_rect.collidepoint(pos):
+            self._start_game("medium")
+        elif self.hard_rect.collidepoint(pos):
+            self._start_game("hard")
+
+    def _start_game(self, ai_level: str | None = None) -> None:
+        self.ai_level = ai_level
+        self.game_started = True
+        self.state = initial_state()
+        self.display_state = self.state
+        self.advice = recommend_move(self.state)
+        self.events = []
+        self.animation_steps = []
+        self.current_step = None
+        self.message = "Player 1: choose a highlighted pit."
+
     def _handle_click(self, pos: tuple[int, int]) -> None:
+        if not self.game_started:
+            self._handle_menu_click(pos)
+            return
         if self.restart_rect.collidepoint(pos):
-            self.state = initial_state()
-            self.display_state = self.state
-            self.events = []
-            self.advice = recommend_move(self.state)
-            self.animation_steps = []
-            self.current_step = None
-            self.message = "Player 1: choose a highlighted pit."
+            self._start_game(self.ai_level)
             return
         if self.current_step or self.animation_steps:
             return
@@ -187,15 +234,64 @@ class SeedDuelApp:
             self.current_step = None
             if not self.animation_steps:
                 self.display_state = self.state
-                self.advice = recommend_move(self.state)
-                self.message = self.animation_message
+                if self.ai_level and self.state.phase is Phase.SELECT and self.state.player == 1:
+                    self._play_ai_turn()
+                else:
+                    self.advice = recommend_move(self.state)
+                    self.message = self.animation_message
+
+    def _play_ai_turn(self) -> None:
+        if self.ai_level == "easy":
+            pit_index = choose_greedy_move(self.state)
+        elif self.ai_level == "medium":
+            result = recommend_mcts_move(self.state, iterations=250)
+            pit_index = result.pit_index if result else None
+        else:
+            result = recommend_move(self.state, depth=4)
+            pit_index = result.pit_index if result else None
+        if pit_index is None:
+            return
+
+        before = self.state
+        self.state, events = apply_select_pit(self.state, pit_index)
+        self.events.extend(events)
+        self.advice = None
+        if self.state.phase is Phase.ROUND_END:
+            self.animation_message = "Round ended. Click Settle Round to calculate final totals."
+        else:
+            self.animation_message = "Player 1: choose a highlighted pit."
+        self._queue_turn_animation(before, self.state, events)
+        self.message = f"AI ({self.ai_level}) is choosing a pit..."
 
     def _draw(self) -> None:
         self.screen.fill(BACKGROUND)
+        if not self.game_started:
+            self._draw_start_menu()
+            return
         self._draw_header()
         self._draw_board()
         self._draw_event_panel()
         self._draw_footer()
+
+    def _draw_start_menu(self) -> None:
+        title = self.title_font.render("SEED DUEL", True, BROWN)
+        self.screen.blit(title, title.get_rect(center=(550, 155)))
+        if self.menu_page == "mode":
+            prompt = "Choose a game mode  (1 or 2)"
+            options = ((self.two_player_rect, "1   Two Player"), (self.ai_opponent_rect, "2   Play Against AI"))
+        else:
+            prompt = "Choose AI difficulty  (1, 2 or 3)"
+            options = (
+                (self.easy_rect, "1   Easy  —  Greedy"),
+                (self.medium_rect, "2   Medium  —  Monte Carlo Tree Search"),
+                (self.hard_rect, "3   Hard  —  Minimax"),
+                (self.back_rect, "Back  (Esc or 0)"),
+            )
+        text = self.font.render(prompt, True, MUTED)
+        self.screen.blit(text, text.get_rect(center=(550, 220)))
+        for rect, label in options:
+            pygame.draw.rect(self.screen, BROWN, rect, border_radius=12)
+            self._center_text(label, rect, self.font, PANEL)
 
     def _draw_header(self) -> None:
         self.screen.blit(self.title_font.render("SEED DUEL", True, BROWN), (42, 28))

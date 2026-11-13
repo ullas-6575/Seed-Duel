@@ -6,11 +6,11 @@
 2. Greedy/heuristic baseline: evaluates legal successors.
 3. Minimax with alpha-beta and a decision budget.
 4. Full-game Drop/Skip support using the same action interface.
-5. Optional fuzzy scoring and MCTS, after the core is stable.
+5. Optional fuzzy scoring, after the core is stable.
 
 ### Current implementation
 
-The initial Round-1 implementation provides `seed_duel.ai.recommend_move(state, depth=3)`. It uses minimax with alpha-beta pruning and returns a deterministic recommended legal starting pit, score, searched depth and node count. The Pygame UI displays this as an advisor: the recommended pit receives a blue pulsing ring, but the human can still select any legal pit. It is not yet an autonomous AI player or an experiment runner.
+The Round-1 implementation provides `seed_duel.ai.choose_greedy_move(state)` as a deterministic one-turn easy agent, `seed_duel.ai.recommend_move(state, depth=3)` for minimax, and `seed_duel.ai.recommend_mcts_move(state, iterations=1000)` for Monte Carlo tree search. Greedy returns a legal pit directly; the advisors return a recommended legal pit. MCTS uses UCT selection and random complete-turn rollouts, with an optional seed for repeatable searches. The Pygame game offers two-player and AI-opponent modes: Easy uses Greedy, Medium uses MCTS, and Hard uses Minimax at depth 4. The existing board UI remains the same after the startup selection. There is no experiment runner.
 
 Easy/Medium/Hard are product labels to calibrate experimentally. Do not claim MCTS is inherently stronger than minimax or that a weighted score is automatically fuzzy logic.
 
