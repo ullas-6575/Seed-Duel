@@ -125,3 +125,10 @@ python -m seed_duel
 ```
 
 Create and document these entry points during implementation. Test installation from a clean checkout before submission. A packaged executable is optional unless the teacher requires it; a reliable source-based launch is the minimum.
+
+## 10. Current implementation handoff
+
+- `seed_duel/rules.py` owns all currently implemented Round-1 logic. Do not duplicate sowing, relay, capture or settlement in the UI.
+- `seed_duel/ui/app.py` renders `GameState`, calls `apply_select_pit(state, index)` after a board click, and displays the returned event list.
+- Run the visual application with `python main.py`; run the headless engine demo with `python -m seed_duel`; run tests with `python -m unittest discover -v`.
+- The UI reconstructs visual states from engine events and plays a timed seed-by-seed animation. It never reimplements the game rules. The animation queue disables board input until playback reaches the engine's final state.
