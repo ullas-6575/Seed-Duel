@@ -8,6 +8,10 @@
 4. Full-game Drop/Skip support using the same action interface.
 5. Optional fuzzy scoring and MCTS, after the core is stable.
 
+### Current implementation
+
+The initial Round-1 implementation provides `seed_duel.ai.recommend_move(state, depth=3)`. It uses minimax with alpha-beta pruning and returns a deterministic recommended legal starting pit, score, searched depth and node count. The Pygame UI displays this as an advisor: the recommended pit receives a blue pulsing ring, but the human can still select any legal pit. It is not yet an autonomous AI player or an experiment runner.
+
 Easy/Medium/Hard are product labels to calibrate experimentally. Do not claim MCTS is inherently stronger than minimax or that a weighted score is automatically fuzzy logic.
 
 ## 2. One shared agent interface
