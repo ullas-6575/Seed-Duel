@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from seed_duel.model import GameState, Phase
-from seed_duel.rules import apply_select_pit, legal_actions, settle_round
+from seed_duel.rules import apply_select_pit, legal_actions, round_earnings
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,8 +39,7 @@ def recommend_move(state: GameState, depth: int = 3) -> Recommendation | None:
         nonlocal nodes
         nodes += 1
         if position.phase is Phase.ROUND_END:
-            settled, _ = settle_round(position)
-            return _terminal_value(settled, root_player)
+            return _terminal_value(position, root_player)
         if remaining == 0:
             return _heuristic_value(position, root_player)
 
@@ -81,8 +80,13 @@ def recommend_move(state: GameState, depth: int = 3) -> Recommendation | None:
 
 
 def _terminal_value(state: GameState, root_player: int) -> int:
+    if state.winner is not None:
+        return 10**9 if state.winner == root_player else -(10**9)
+    if state.phase is Phase.GAME_END:
+        return 0
     opponent = 1 - root_player
-    return (state.captured[root_player] - state.captured[opponent]) * 1000
+    scores = round_earnings(state)
+    return (scores[root_player] - scores[opponent]) * 1000
 
 
 def _heuristic_value(state: GameState, root_player: int) -> int:
@@ -90,7 +94,8 @@ def _heuristic_value(state: GameState, root_player: int) -> int:
     opponent = 1 - root_player
     root_board = sum(seed for index, seed in enumerate(state.pits) if state.owner_of(index) == root_player)
     opponent_board = sum(seed for index, seed in enumerate(state.pits) if state.owner_of(index) == opponent)
-    captured_balance = state.captured[root_player] - state.captured[opponent]
+    captured_balance = (state.captured[root_player] + state.reserves[root_player]
+                        - state.captured[opponent] - state.reserves[opponent])
     board_balance = root_board - opponent_board
     mobility_balance = len(legal_actions(state)) if state.player == root_player else -len(legal_actions(state))
     return captured_balance * 20 + board_balance * 2 + mobility_balance

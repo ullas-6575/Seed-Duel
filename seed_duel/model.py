@@ -8,7 +8,9 @@ from enum import Enum
 
 class Phase(str, Enum):
     SELECT = "select"
+    DROP_SKIP = "drop_skip"
     ROUND_END = "round_end"
+    GAME_END = "game_end"
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,7 +36,16 @@ class GameState:
     cursor: int | None = None  # Last pit visited; next pit is cursor + 1.
     initial_total: int = 40
     round_number: int = 1
+    round_starter: int = 0
     terminal_reason: str | None = None
+    winner: int | None = None
+    seeds_per_pit: int = 4
+    owners: tuple[int, ...] = ()
+    protected: tuple[bool, ...] = ()
+    pending_protected: int | None = None
+    round_positions: tuple[tuple[object, ...], ...] = ()
+    settled_positions: tuple[tuple[object, ...], ...] = ()
+    turn_seen: tuple[tuple[object, ...], ...] = ()
 
     def evolve(self, **changes: object) -> "GameState":
         return replace(self, **changes)
@@ -44,7 +55,15 @@ class GameState:
         return len(self.pits) // 2
 
     def owner_of(self, index: int) -> int:
+        if self.owners:
+            return self.owners[index]
         return 0 if index < self.pit_count_per_player else 1
+
+    def original_owner_of(self, index: int) -> int:
+        return 0 if index < self.pit_count_per_player else 1
+
+    def is_protected(self, index: int) -> bool:
+        return bool(self.protected and self.protected[index])
 
     def seed_total(self) -> int:
         return sum(self.pits) + self.hand + sum(self.captured) + sum(self.reserves)
@@ -56,3 +75,7 @@ class GameState:
             )
         if any(value < 0 for value in (*self.pits, *self.captured, *self.reserves, self.hand)):
             raise AssertionError("Seed counts cannot be negative")
+        if self.owners and (len(self.owners) != len(self.pits) or any(owner not in (0, 1) for owner in self.owners)):
+            raise AssertionError("Each pit must have a valid owner")
+        if self.protected and len(self.protected) != len(self.pits):
+            raise AssertionError("Each pit must have a protected flag")

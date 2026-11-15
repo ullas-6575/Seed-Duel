@@ -37,8 +37,11 @@ class RoundOneRulesTests(unittest.TestCase):
         self.assertEqual(events[0].kind, "RoundEnded")
         settled, _ = settle_round(ended)
 
-        self.assertEqual(settled.pits, (0,) * 10)
-        self.assertEqual(settled.captured, (18, 22))
+        self.assertEqual(settled.pits, (4, 4, 4, 4, 0, 4, 4, 4, 4, 4))
+        self.assertEqual(settled.captured, (0, 0))
+        self.assertEqual(settled.reserves, (2, 2))
+        self.assertEqual(settled.owners, (0, 0, 0, 0, 1, 1, 1, 1, 1, 1))
+        self.assertTrue(settled.protected[4])
         settled.assert_conserved()
 
     def test_illegal_selection_does_not_change_state(self) -> None:
