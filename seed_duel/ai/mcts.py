@@ -7,7 +7,7 @@ from math import log, sqrt
 import random
 
 from seed_duel.model import GameState, Phase
-from seed_duel.rules import apply_select_pit, legal_actions, settle_round
+from seed_duel.rules import apply_select_pit, legal_actions, round_earnings
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,7 +99,6 @@ def _rollout(state: GameState, root_player: int, limit: int, rng: random.Random)
     # shortcut: score at the rollout limit; raise it if typical rounds exceed this depth.
     for _ in range(limit):
         if position.phase is Phase.ROUND_END:
-            position, _ = settle_round(position)
             return _score_fraction(position, root_player)
         actions = legal_actions(position)
         if not actions:
@@ -109,11 +108,14 @@ def _rollout(state: GameState, root_player: int, limit: int, rng: random.Random)
 
 
 def _score_fraction(state: GameState, root_player: int) -> float:
+    if state.phase is Phase.GAME_END:
+        return 0.5 if state.winner is None else float(state.winner == root_player)
     if state.phase is Phase.ROUND_END:
-        state, _ = settle_round(state)
-    scores = list(state.captured)
-    for index, seeds in enumerate(state.pits):
-        scores[state.owner_of(index)] += seeds
+        scores = round_earnings(state)
+    else:
+        scores = [state.captured[p] + state.reserves[p] for p in (0, 1)]
+        for index, seeds in enumerate(state.pits):
+            scores[state.owner_of(index)] += seeds
     if state.initial_total == 0:
         return 0.5
     difference = scores[root_player] - scores[1 - root_player]

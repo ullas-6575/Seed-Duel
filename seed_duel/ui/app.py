@@ -8,7 +8,10 @@ from math import sin
 import pygame
 
 from seed_duel.model import Event, GameState, Phase
-from seed_duel.rules import apply_select_pit, initial_state, legal_actions, settle_round
+from seed_duel.rules import (
+    apply_protected_choice, apply_select_pit, begin_turn, initial_state,
+    legal_actions, settle_round,
+)
 from seed_duel.ai.greedy import choose_move as choose_greedy_move
 from seed_duel.ai.mcts import recommend_move as recommend_mcts_move
 from seed_duel.ai.minimax import Recommendation, recommend_move
@@ -72,6 +75,10 @@ class SeedDuelApp:
         self.step_started_at = 0
         self.animation_message = ""
         self.message = "Player 1: choose a highlighted pit."
+        self.round_scores = [0, 0]
+        self.draw_offer = False
+        self.round_choice_offer: str | None = None
+        self.game_over = False
         self.running = True
         self.pits = self._make_pit_views()
         self.two_player_rect = pygame.Rect(300, 300, 500, 70)
@@ -84,6 +91,11 @@ class SeedDuelApp:
         self.resign_rect = pygame.Rect(743, 29, 145, 42)
         self.restart_rect = pygame.Rect(896, 29, 160, 42)
         self.settle_rect = pygame.Rect(863, 620, 193, 42)
+        self.draw_rect = pygame.Rect(863, 620, 193, 42)
+        self.end_game_rect = pygame.Rect(855, 620, 98, 42)
+        self.continue_rect = pygame.Rect(963, 620, 102, 42)
+        self.accept_draw_rect = pygame.Rect(855, 620, 98, 42)
+        self.decline_draw_rect = pygame.Rect(963, 620, 102, 42)
 
     @staticmethod
     def _make_pit_views() -> tuple[PitView, ...]:
@@ -160,6 +172,10 @@ class SeedDuelApp:
         self.animation_steps = []
         self.current_step = None
         self.message = "Player 1: choose a highlighted pit."
+        self.round_scores = [0, 0]
+        self.draw_offer = False
+        self.round_choice_offer = None
+        self.game_over = False
 
     def _return_to_menu(self, page: str, clear_history: bool = False) -> None:
         self.game_started = False
@@ -187,30 +203,90 @@ class SeedDuelApp:
         if self.resign_rect.collidepoint(pos):
             self._return_to_menu("mode", clear_history=True)
             return
+        if self.game_over:
+            return
         if self.current_step or self.animation_steps:
             return
-        if self.state.phase is Phase.ROUND_END and self.settle_rect.collidepoint(pos):
+        if self.draw_offer:
+            if self.accept_draw_rect.collidepoint(pos):
+                self.game_over = True
+                self.draw_offer = False
+                self.message = "Draw agreed by both players. Press Restart to play again."
+            elif self.decline_draw_rect.collidepoint(pos):
+                self.draw_offer = False
+                self.message = "Draw declined. Continue playing."
+            return
+        if self.round_choice_offer is not None:
+            if self.accept_draw_rect.collidepoint(pos):
+                choice = self.round_choice_offer
+                self.round_choice_offer = None
+                self._apply_round_choice(choice)
+            elif self.decline_draw_rect.collidepoint(pos):
+                self.round_choice_offer = None
+                self.message = "Choice declined. Select End Game or Continue again."
+            return
+        if self.state.phase is Phase.SELECT and self.draw_rect.collidepoint(pos):
+            if self.ai_level:
+                self.game_over = True
+                self.message = "Draw agreed. Press Restart to play again."
+            else:
+                self.draw_offer = True
+                self.message = f"Player {self.state.player + 1} proposed a draw. Player {2 - self.state.player}: agree or decline."
+            return
+        if (self.state.phase is Phase.ROUND_END and self.state.terminal_reason != "settled"
+                and self.settle_rect.collidepoint(pos)):
             self.state, new_events = settle_round(self.state)
             self.display_state = self.state
             self.events.extend(new_events)
-            p1, p2 = self.state.captured
-            if p1 == p2:
-                self.message = f"Round draw: {p1} - {p2}. Press Restart to play again."
+            totals = dict(new_events[0].data)
+            p1, p2 = int(totals["player1"]), int(totals["player2"])
+            self.round_scores[0] += p1
+            self.round_scores[1] += p2
+            if self.state.phase is Phase.GAME_END:
+                self.game_over = True
+                self.message = (f"Draw: {self.state.terminal_reason}." if self.state.winner is None else
+                                f"Player {self.state.winner + 1} wins by {self.state.terminal_reason}.")
             else:
-                winner = 1 if p1 > p2 else 2
-                self.message = f"Player {winner} wins: {p1} - {p2}. Press Restart to play again."
+                self.message = f"Round settled: {p1} - {p2}. End the game or continue. Series: {self.round_scores[0]} - {self.round_scores[1]}."
+            return
+        if self.state.terminal_reason == "settled":
+            choice = "end" if self.end_game_rect.collidepoint(pos) else "continue" if self.continue_rect.collidepoint(pos) else None
+            if choice:
+                if self.ai_level:
+                    self._apply_round_choice(choice)
+                else:
+                    self.round_choice_offer = choice
+                    self.message = f"Player {2 - self.state.player}: agree to {('end the game' if choice == 'end' else 'continue')}?"
+            return
+        if self.state.phase is Phase.DROP_SKIP:
+            if self.accept_draw_rect.collidepoint(pos):
+                before = self.state
+                self.state, events = apply_protected_choice(self.state, drop=True)
+            elif self.decline_draw_rect.collidepoint(pos):
+                before = self.state
+                self.state, events = apply_protected_choice(self.state, drop=False)
+            else:
+                return
+            self.events.extend(events)
+            self._queue_turn_animation(before, self.state, events)
+            self.animation_message = ("Protected pit encountered: choose Drop or Skip."
+                                      if self.state.phase is Phase.DROP_SKIP else
+                                      f"Player {self.state.player + 1}: choose a highlighted pit.")
             return
         if self.state.phase is not Phase.SELECT:
             return
         for pit in self.pits:
             if pit.rect.collidepoint(pos):
                 before = self.state
-                self.state, new_events = apply_select_pit(self.state, pit.index)
+                self.state, new_events = apply_select_pit(self.state, pit.index, auto_protected=False)
                 self.advice = None
                 self.events.extend(new_events)
                 if new_events and new_events[0].kind == "IllegalAction":
                     self.message = "Choose one of your highlighted non-empty pits."
                     self.display_state = self.state
+                elif self.state.phase is Phase.DROP_SKIP:
+                    self._queue_turn_animation(before, self.state, new_events)
+                    self.animation_message = "Protected pit encountered: choose Drop or Skip."
                 elif self.state.phase is Phase.ROUND_END:
                     self._queue_turn_animation(before, self.state, new_events)
                     self.animation_message = "Round ended. Click Settle Round to calculate final totals."
@@ -218,6 +294,25 @@ class SeedDuelApp:
                     self._queue_turn_animation(before, self.state, new_events)
                     self.animation_message = f"Player {self.state.player + 1}: choose a highlighted pit."
                 return
+
+    def _apply_round_choice(self, choice: str) -> None:
+        if choice == "end":
+            self.game_over = True
+            p1, p2 = self.round_scores
+            self.message = (f"Game drawn: {p1} - {p2}. Press Restart to play again." if p1 == p2 else
+                            f"Player {1 if p1 > p2 else 2} wins: {p1} - {p2}. Press Restart to play again.")
+            return
+        self.state = self.state.evolve(
+            phase=Phase.SELECT, terminal_reason=None,
+            round_number=self.state.round_number + 1,
+        )
+        self.state, _ = begin_turn(self.state)
+        self.display_state = self.state
+        self.advice = recommend_move(self.state)
+        self.events = []
+        self.message = f"Round {self.state.round_number}: Player {self.state.player + 1}, choose a highlighted pit."
+        if self.ai_level and self.state.phase is Phase.SELECT and self.state.player == 1:
+            self._play_ai_turn()
 
     def _queue_turn_animation(self, before: GameState, final: GameState, events: tuple[Event, ...]) -> None:
         """Build visual frames from engine events without reimplementing rules."""
@@ -241,8 +336,26 @@ class SeedDuelApp:
                 after = working.evolve(pits=tuple(pits), hand=working.hand - 1, cursor=target)
                 steps.append(AnimationStep(working, after, event, 210, working.cursor, target))
                 working = after
+            elif event.kind == "ProtectedPitEncountered":
+                target = int(data["index"])
+                after = working.evolve(phase=Phase.DROP_SKIP, pending_protected=target)
+                steps.append(AnimationStep(working, after, event, 180, target_index=target))
+                working = after
+            elif event.kind in ("ProtectedPitDropped", "ProtectedPitSkipped"):
+                target = int(data["index"])
+                pits = list(working.pits)
+                hand = working.hand
+                if event.kind == "ProtectedPitDropped":
+                    pits[target] += 1
+                    hand -= 1
+                after = working.evolve(pits=tuple(pits), hand=hand, cursor=target,
+                                       phase=Phase.SELECT, pending_protected=None)
+                steps.append(AnimationStep(working, after, event, 210, working.cursor, target))
+                working = after
             elif event.kind == "SeedsCaptured":
                 index, amount, player = int(data["index"]), int(data["amount"]), int(data["player"])
+                if index < 0 or amount == 0:
+                    continue
                 pits, captured = list(working.pits), list(working.captured)
                 pits[index] = 0
                 captured[player] += amount
@@ -327,7 +440,7 @@ class SeedDuelApp:
 
     def _draw_header(self) -> None:
         self.screen.blit(self.title_font.render("SEED DUEL", True, BROWN), (42, 28))
-        self.screen.blit(self.small_font.render("Round 1 • Relay sowing and capture", True, MUTED), (44, 69))
+        self.screen.blit(self.small_font.render(f"Round {self.state.round_number} • Relay sowing and capture", True, MUTED), (44, 69))
         pygame.draw.rect(self.screen, BROWN, self.back_game_rect, border_radius=10)
         self._center_text("Back", self.back_game_rect, self.small_font, PANEL)
         pygame.draw.rect(self.screen, RED, self.resign_rect, border_radius=10)
@@ -348,6 +461,11 @@ class SeedDuelApp:
             is_recommended = self.advice is not None and pit.index == self.advice.pit_index and not self.current_step
             self._draw_pit(pit, self.display_state.pits[pit.index], is_legal, is_recommended)
             self._center_text(str(pit.index + 1), pygame.Rect(pit.rect.x, pit.rect.y + 8, pit.rect.width, 20), self.small_font, PANEL)
+            owner = self.display_state.owner_of(pit.index)
+            marker = pygame.Rect(pit.center[0] - 22, pit.rect.y - 13, 44, 20)
+            pygame.draw.rect(self.screen, GREEN if owner == 0 else RED, marker, border_radius=8)
+            label = f"P{owner + 1}{' L' if self.display_state.is_protected(pit.index) else ''}"
+            self._center_text(label, marker, self.small_font, PANEL)
         self._draw_flying_seed()
 
     def _draw_event_panel(self) -> None:
@@ -355,28 +473,52 @@ class SeedDuelApp:
         pygame.draw.rect(self.screen, PANEL, panel, border_radius=20)
         self._text("GAME STATUS", (875, 145), self.font, BROWN)
         player_text = f"Player {self.display_state.player + 1} is playing..." if self.current_step else (
-            "Round complete" if self.display_state.phase is Phase.ROUND_END else f"Player {self.display_state.player + 1}'s turn"
+            "Game complete" if self.display_state.phase is Phase.GAME_END else
+            "Choose Drop or Skip" if self.display_state.phase is Phase.DROP_SKIP else
+            "Round complete" if self.display_state.phase is Phase.ROUND_END else
+            f"Player {self.display_state.player + 1}'s turn"
         )
         self._text(player_text, (875, 182), self.small_font, TEXT)
         self._text(f"P1 captured: {self.display_state.captured[0]}", (875, 222), self.small_font, GREEN)
         self._text(f"P2 captured: {self.display_state.captured[1]}", (875, 248), self.small_font, RED)
         self._text(f"Seeds total: {self.display_state.seed_total()} / {self.display_state.initial_total}", (875, 285), self.small_font, TEXT)
+        self._text(f"Reserves: {self.display_state.reserves[0]} / {self.display_state.reserves[1]}", (875, 307), self.small_font, TEXT)
+        territory = tuple(sum(self.display_state.owner_of(i) == player for i in range(len(self.display_state.pits)))
+                          for player in (0, 1))
+        self._text(f"Pits owned: {territory[0]} / {territory[1]}", (875, 329), self.small_font, TEXT)
         if self.advice and not self.current_step:
-            self._text(f"AI suggests: Pit {self.advice.pit_index + 1}", (875, 310), self.small_font, ADVISOR)
-            self._text(f"Minimax score: {self.advice.score}", (875, 332), self.small_font, MUTED)
-        pygame.draw.line(self.screen, GOLD, (875, 357), (1044, 357), 2)
-        self._text("Latest events", (875, 376), self.small_font, BROWN)
+            self._text(f"AI suggests: Pit {self.advice.pit_index + 1}", (875, 351), self.small_font, ADVISOR)
+            self._text(f"Minimax score: {self.advice.score}", (875, 373), self.small_font, MUTED)
+        pygame.draw.line(self.screen, GOLD, (875, 394), (1044, 394), 2)
+        self._text("Latest events", (875, 411), self.small_font, BROWN)
         recent = self.events[-8:] or [Event.create("WaitingForMove")]
         for row, event in enumerate(recent):
-            self._text(self._event_text(event.kind, dict(event.data)), (875, 405 + row * 22), self.small_font, MUTED)
+            self._text(self._event_text(event.kind, dict(event.data)), (875, 434 + row * 19), self.small_font, MUTED)
 
     def _draw_footer(self) -> None:
         message_rect = pygame.Rect(40, 585, 790, 95)
         pygame.draw.rect(self.screen, PANEL, message_rect, border_radius=18)
         self._wrapped_text(self.message, message_rect.inflate(-30, -22), self.font, TEXT)
-        if self.state.phase is Phase.ROUND_END:
+        if self.state.phase is Phase.ROUND_END and self.state.terminal_reason != "settled":
             pygame.draw.rect(self.screen, BROWN, self.settle_rect, border_radius=10)
             self._center_text("Settle Round", self.settle_rect, self.font, PANEL)
+        elif self.state.terminal_reason == "settled" and not self.game_over:
+            buttons = (((self.accept_draw_rect, "Agree"), (self.decline_draw_rect, "Decline"))
+                       if self.round_choice_offer is not None else
+                       ((self.end_game_rect, "End Game"), (self.continue_rect, "Continue")))
+            for rect, label in buttons:
+                pygame.draw.rect(self.screen, BROWN, rect, border_radius=10)
+                self._center_text(label, rect, self.small_font, PANEL)
+        elif self.state.phase in (Phase.SELECT, Phase.DROP_SKIP) and not self.game_over:
+            if self.draw_offer:
+                buttons = ((self.accept_draw_rect, "Agree"), (self.decline_draw_rect, "Decline"))
+            elif self.state.phase is Phase.DROP_SKIP:
+                buttons = ((self.accept_draw_rect, "Drop"), (self.decline_draw_rect, "Skip"))
+            else:
+                buttons = ((self.draw_rect, "Propose Draw"),)
+            for rect, label in buttons:
+                pygame.draw.rect(self.screen, BROWN, rect, border_radius=10)
+                self._center_text(label, rect, self.small_font, PANEL)
 
     def _draw_pit(self, pit: PitView, count: int, is_legal: bool, is_recommended: bool) -> None:
         """Draw a deep, inset wooden well rather than a flat coloured oval."""
@@ -440,7 +582,21 @@ class SeedDuelApp:
         if kind == "SeedsPickedUp":
             return f"Pick up {data['amount']} from {int(data['index']) + 1}"
         if kind == "SeedsCaptured":
+            if int(data["index"]) < 0 or int(data["amount"]) == 0:
+                return "No capture (empty target)"
             return f"Capture {data['amount']} from {int(data['index']) + 1}"
+        if kind == "ProtectedPitEncountered":
+            return f"Protected pit {int(data['index']) + 1}: drop or skip"
+        if kind == "ProtectedPitDropped":
+            return f"Drop into protected pit {int(data['index']) + 1}"
+        if kind == "ProtectedPitSkipped":
+            return f"Skip protected pit {int(data['index']) + 1}"
+        if kind == "OwnershipChanged":
+            return f"Pit {int(data['index']) + 1} transfers to P{int(data['owner']) + 1}"
+        if kind == "PitReclaimed":
+            return f"P{int(data['owner']) + 1} reclaims pit {int(data['index']) + 1}"
+        if kind == "PositionRepeated":
+            return "Position repeated; round ends"
         if kind == "PitSelected":
             return f"Select pit {int(data['index']) + 1}"
         return kind.replace("_", " ")

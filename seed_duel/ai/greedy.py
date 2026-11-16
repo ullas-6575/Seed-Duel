@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from seed_duel.model import GameState, Phase
-from seed_duel.rules import apply_select_pit, legal_actions, settle_round
+from seed_duel.rules import apply_select_pit, legal_actions, round_earnings
 
 
 def choose_move(state: GameState) -> int | None:
@@ -28,8 +28,8 @@ def choose_move(state: GameState) -> int | None:
 
 def _evaluate(state: GameState, player: int) -> int:
     if state.phase is Phase.ROUND_END:
-        state, _ = settle_round(state)
-        return (state.captured[player] - state.captured[1 - player]) * 1000
+        scores = round_earnings(state)
+        return (scores[player] - scores[1 - player]) * 1000
 
     own_board = sum(seeds for index, seeds in enumerate(state.pits) if state.owner_of(index) == player)
     other_board = sum(seeds for index, seeds in enumerate(state.pits) if state.owner_of(index) != player)
