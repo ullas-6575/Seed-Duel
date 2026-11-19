@@ -1,6 +1,6 @@
 # Seed Duel
 
-Seed Duel is a local Python and Pygame strategy game. Play against another person or choose an AI opponent. Rounds redistribute seeds according to pit ownership, and pits that cannot be refilled transfer ownership and become protected.
+Seed Duel is a local Python and Pygame strategy game. Play Human vs Human, Human vs AI, or watch two AI agents compete. Rounds redistribute seeds according to pit ownership, and pits that cannot be refilled transfer ownership and become protected.
 
 ## How to play
 
@@ -21,6 +21,16 @@ Choose **Play Against AI** from the startup menu, then select a level:
 - **Easy — Greedy:** chooses the move with the best immediate heuristic score.
 - **Medium — MCTS:** uses Monte Carlo tree search with 250 iterations.
 - **Hard — Minimax:** searches four turns ahead.
+
+## AI vs AI matchups
+
+Choose **AI vs AI** from the startup menu. Player 1 uses the first named algorithm and moves first:
+
+- **MCTS vs Minimax Alpha-Beta**
+- **Greedy vs MCTS**
+- **Greedy vs Minimax Alpha-Beta**
+
+Both sides choose pits and protected-pit Drop/Skip actions automatically. Round settlement and the End Game/Continue controls remain visible so a viewer can inspect each completed round before continuing.
 
 ## Install and run
 
@@ -44,7 +54,7 @@ On Windows, create the environment with `py -m venv .venv`. Activate it in Power
 
 - Use the mouse to select menu options and legal pits.
 - You can also select menu options with the number keys shown on screen. On the AI level page, press `Esc` or `0` to go back.
-- **Restart** starts the current mode and AI level over.
+- **Restart** starts the current mode, AI level, or AI matchup over.
 - **Back** returns to the previous setup page.
 - **Resign & Leave** returns to the main mode selection.
 - At the end of a round, click **Settle Round**, then choose **End Game** or **Continue**. End Game reports the score accumulated across settled rounds.
