@@ -42,6 +42,27 @@ SEED_BASE = (201, 99, 42)
 SEED_LIGHT = (245, 164, 78)
 ADVISOR = (54, 116, 190)
 
+AI_LEVEL_ALGORITHMS = {
+    "easy": "greedy",
+    "medium": "mcts",
+    "hard": "minimax",
+}
+AI_NAMES = {
+    "greedy": "Greedy",
+    "mcts": "MCTS",
+    "minimax": "Minimax Alpha-Beta",
+}
+AI_SHORT_NAMES = {
+    "greedy": "Greedy",
+    "mcts": "MCTS",
+    "minimax": "Minimax AB",
+}
+AI_MATCHUPS = (
+    ("mcts", "minimax"),
+    ("greedy", "mcts"),
+    ("greedy", "minimax"),
+)
+
 
 @dataclass(frozen=True, slots=True)
 class PitView:
@@ -79,6 +100,7 @@ class SeedDuelApp:
         self.menu_history: list[str] = []
         self.previous_menu_page = "mode"
         self.ai_level: str | None = None
+        self.ai_matchup: tuple[str, str] | None = None
         self.events: list[Event] = []
         self.animation_steps: list[AnimationStep] = []
         self.current_step: AnimationStep | None = None
@@ -97,6 +119,7 @@ class SeedDuelApp:
         self.pits = self._make_pit_views()
         self.two_player_rect = pygame.Rect(300, 300, 500, 70)
         self.ai_opponent_rect = pygame.Rect(300, 390, 500, 70)
+        self.ai_vs_ai_rect = pygame.Rect(300, 480, 500, 70)
         self.easy_rect = pygame.Rect(300, 260, 500, 65)
         self.medium_rect = pygame.Rect(300, 345, 500, 65)
         self.hard_rect = pygame.Rect(300, 430, 500, 65)
@@ -149,10 +172,16 @@ class SeedDuelApp:
                 self._start_game()
             elif key == pygame.K_2:
                 self._open_menu_page("level")
+            elif key == pygame.K_3:
+                self._open_menu_page("matchup")
         elif key == pygame.K_ESCAPE or key == pygame.K_0:
             self._go_back()
         elif key in (pygame.K_1, pygame.K_2, pygame.K_3):
-            self._start_game(("easy", "medium", "hard")[key - pygame.K_1])
+            index = key - pygame.K_1
+            if self.menu_page == "matchup":
+                self._start_game(ai_matchup=AI_MATCHUPS[index])
+            else:
+                self._start_game(("easy", "medium", "hard")[index])
 
     def _handle_menu_click(self, pos: tuple[int, int]) -> None:
         if self.menu_page == "mode":
@@ -160,14 +189,25 @@ class SeedDuelApp:
                 self._start_game()
             elif self.ai_opponent_rect.collidepoint(pos):
                 self._open_menu_page("level")
+            elif self.ai_vs_ai_rect.collidepoint(pos):
+                self._open_menu_page("matchup")
         elif self.back_rect.collidepoint(pos):
             self._go_back()
         elif self.easy_rect.collidepoint(pos):
-            self._start_game("easy")
+            if self.menu_page == "matchup":
+                self._start_game(ai_matchup=AI_MATCHUPS[0])
+            else:
+                self._start_game("easy")
         elif self.medium_rect.collidepoint(pos):
-            self._start_game("medium")
+            if self.menu_page == "matchup":
+                self._start_game(ai_matchup=AI_MATCHUPS[1])
+            else:
+                self._start_game("medium")
         elif self.hard_rect.collidepoint(pos):
-            self._start_game("hard")
+            if self.menu_page == "matchup":
+                self._start_game(ai_matchup=AI_MATCHUPS[2])
+            else:
+                self._start_game("hard")
 
     def _open_menu_page(self, page: str) -> None:
         self.menu_history.append(self.menu_page)
@@ -177,9 +217,14 @@ class SeedDuelApp:
         if self.menu_history:
             self.menu_page = self.menu_history.pop()
 
-    def _start_game(self, ai_level: str | None = None) -> None:
+    def _start_game(
+        self,
+        ai_level: str | None = None,
+        ai_matchup: tuple[str, str] | None = None,
+    ) -> None:
         self.previous_menu_page = self.menu_page
         self.ai_level = ai_level
+        self.ai_matchup = ai_matchup
         self.game_started = True
         self.state = initial_state()
         self.display_state = self.state
@@ -196,11 +241,14 @@ class SeedDuelApp:
         self.loop_previous_choice = None
         self.loop_dialog_message = ""
         self.game_over = False
+        if self._algorithm_for_player(self.state.player) is not None:
+            self._play_ai_turn()
 
     def _return_to_menu(self, page: str, clear_history: bool = False) -> None:
         self.game_started = False
         self.menu_page = page
         self.ai_level = None
+        self.ai_matchup = None
         if clear_history:
             self.menu_history.clear()
         self.state = initial_state()
@@ -214,12 +262,27 @@ class SeedDuelApp:
         self.loop_previous_choice = None
         self.loop_dialog_message = ""
 
+    def _algorithm_for_player(self, player: int) -> str | None:
+        if self.ai_matchup is not None:
+            return self.ai_matchup[player]
+        if self.ai_level is not None and player == 1:
+            return AI_LEVEL_ALGORITHMS[self.ai_level]
+        return None
+
+    def _player_name(self, player: int) -> str:
+        algorithm = self._algorithm_for_player(player)
+        return (
+            f"P{player + 1} {AI_SHORT_NAMES[algorithm]}"
+            if algorithm is not None
+            else f"Player {player + 1}"
+        )
+
     def _handle_click(self, pos: tuple[int, int]) -> None:
         if not self.game_started:
             self._handle_menu_click(pos)
             return
         if self.restart_rect.collidepoint(pos):
-            self._start_game(self.ai_level)
+            self._start_game(self.ai_level, self.ai_matchup)
             return
         if self.back_game_rect.collidepoint(pos):
             self._return_to_menu(self.previous_menu_page)
@@ -255,6 +318,11 @@ class SeedDuelApp:
                 self.round_choice_offer = None
                 self.message = "Choice declined. Select End Game or Continue again."
             return
+        if (
+            self.state.phase in (Phase.SELECT, Phase.DROP_SKIP)
+            and self._algorithm_for_player(self.state.player) is not None
+        ):
+            return
         if self.state.phase is Phase.SELECT and self.draw_rect.collidepoint(pos):
             if self.ai_level:
                 self.game_over = True
@@ -270,7 +338,7 @@ class SeedDuelApp:
         if self.state.terminal_reason == "settled":
             choice = "end" if self.end_game_rect.collidepoint(pos) else "continue" if self.continue_rect.collidepoint(pos) else None
             if choice:
-                if self.ai_level:
+                if self.ai_level or self.ai_matchup:
                     self._apply_round_choice(choice)
                 else:
                     self.round_choice_offer = choice
@@ -341,7 +409,10 @@ class SeedDuelApp:
         self.advice = recommend_move(self.state)
         self.events = []
         self.message = f"Round {self.state.round_number}: Player {self.state.player + 1}, choose a highlighted pit."
-        if self.ai_level and self.state.phase is Phase.SELECT and self.state.player == 1:
+        if (
+            self.state.phase is Phase.SELECT
+            and self._algorithm_for_player(self.state.player) is not None
+        ):
             self._play_ai_turn()
 
     def _settle_current_round(self) -> None:
@@ -497,20 +568,27 @@ class SeedDuelApp:
             self.current_step = None
             if not self.animation_steps:
                 self.display_state = self.state
-                if (not self.loop_choice_offer and self.ai_level and self.state.player == 1
-                        and self.state.phase in (Phase.SELECT, Phase.DROP_SKIP)):
+                if (
+                    not self.loop_choice_offer
+                    and self._algorithm_for_player(self.state.player) is not None
+                    and self.state.phase in (Phase.SELECT, Phase.DROP_SKIP)
+                ):
                     self._play_ai_turn()
                 else:
                     self.advice = recommend_move(self.state)
                     self.message = self.animation_message
 
     def _play_ai_turn(self) -> None:
+        algorithm = self._algorithm_for_player(self.state.player)
+        if algorithm is None:
+            return
         before = self.state
+        acting_player = self.state.player
         decision_text: str
         if self.state.phase is Phase.DROP_SKIP:
-            if self.ai_level == "easy":
+            if algorithm == "greedy":
                 drop = choose_greedy_protected_choice(self.state)
-            elif self.ai_level == "medium":
+            elif algorithm == "mcts":
                 choice = recommend_mcts_protected_choice(self.state, iterations=250)
                 drop = choice.drop if choice else None
             else:
@@ -521,9 +599,9 @@ class SeedDuelApp:
             self.state, events = apply_protected_choice(self.state, drop=drop)
             decision_text = "Drop" if drop else "Skip"
         else:
-            if self.ai_level == "easy":
+            if algorithm == "greedy":
                 pit_index = choose_greedy_move(self.state)
-            elif self.ai_level == "medium":
+            elif algorithm == "mcts":
                 result = recommend_mcts_move(self.state, iterations=250)
                 pit_index = result.pit_index if result else None
             else:
@@ -541,11 +619,20 @@ class SeedDuelApp:
         if self.state.phase is Phase.ROUND_END:
             self.animation_message = "Round ended. Click Settle Round to calculate final totals."
         elif self.state.phase is Phase.DROP_SKIP:
-            self.animation_message = "AI is evaluating Drop versus Skip..."
+            self.animation_message = (
+                f"{self._player_name(self.state.player)} is evaluating Drop versus Skip..."
+            )
         else:
-            self.animation_message = "Player 1: choose a highlighted pit."
+            next_algorithm = self._algorithm_for_player(self.state.player)
+            self.animation_message = (
+                f"{self._player_name(self.state.player)} is thinking..."
+                if next_algorithm is not None
+                else f"Player {self.state.player + 1}: choose a highlighted pit."
+            )
         self._queue_turn_animation(before, self.state, events)
-        self.message = f"AI ({self.ai_level}) chose {decision_text}."
+        self.message = (
+            f"{self._player_name(acting_player)} chose {decision_text}."
+        )
 
     def _draw(self) -> None:
         self.screen.fill(BACKGROUND)
@@ -562,14 +649,26 @@ class SeedDuelApp:
         title = self.title_font.render("SEED DUEL", True, BROWN)
         self.screen.blit(title, title.get_rect(center=(550, 155)))
         if self.menu_page == "mode":
-            prompt = "Choose a game mode  (1 or 2)"
-            options = ((self.two_player_rect, "1   Two Player"), (self.ai_opponent_rect, "2   Play Against AI"))
-        else:
+            prompt = "Choose a game mode  (1, 2 or 3)"
+            options = (
+                (self.two_player_rect, "1   Human vs Human"),
+                (self.ai_opponent_rect, "2   Human vs AI"),
+                (self.ai_vs_ai_rect, "3   AI vs AI"),
+            )
+        elif self.menu_page == "level":
             prompt = "Choose AI difficulty  (1, 2 or 3)"
             options = (
                 (self.easy_rect, "1   Easy  —  Greedy"),
                 (self.medium_rect, "2   Medium  —  Monte Carlo Tree Search"),
                 (self.hard_rect, "3   Hard  —  Minimax"),
+                (self.back_rect, "Back  (Esc or 0)"),
+            )
+        else:
+            prompt = "Choose an AI matchup  (1, 2 or 3)"
+            options = (
+                (self.easy_rect, "1   MCTS vs Minimax Alpha-Beta"),
+                (self.medium_rect, "2   Greedy vs MCTS"),
+                (self.hard_rect, "3   Greedy vs Minimax Alpha-Beta"),
                 (self.back_rect, "Back  (Esc or 0)"),
             )
         text = self.font.render(prompt, True, MUTED)
@@ -580,7 +679,19 @@ class SeedDuelApp:
 
     def _draw_header(self) -> None:
         self.screen.blit(self.title_font.render("SEED DUEL", True, BROWN), (42, 28))
-        self.screen.blit(self.small_font.render(f"Round {self.state.round_number} • Relay sowing and capture", True, MUTED), (44, 69))
+        mode = (
+            f"{AI_NAMES[self.ai_matchup[0]]} vs {AI_NAMES[self.ai_matchup[1]]}"
+            if self.ai_matchup is not None
+            else "Human vs AI"
+            if self.ai_level is not None
+            else "Human vs Human"
+        )
+        self.screen.blit(
+            self.small_font.render(
+                f"Round {self.state.round_number} • {mode}", True, MUTED
+            ),
+            (44, 69),
+        )
         pygame.draw.rect(self.screen, BROWN, self.back_game_rect, border_radius=10)
         self._center_text("Back", self.back_game_rect, self.small_font, PANEL)
         pygame.draw.rect(self.screen, RED, self.resign_rect, border_radius=10)
@@ -593,8 +704,8 @@ class SeedDuelApp:
         pygame.draw.rect(self.screen, (190, 174, 148), board.move(0, 6), border_radius=24)
         pygame.draw.rect(self.screen, FELT, board, border_radius=24)
         pygame.draw.rect(self.screen, (141, 160, 123), board, 2, border_radius=24)
-        self._text("PLAYER 2", (69, 145), self.font, RED)
-        self._text("PLAYER 1", (69, 505), self.font, GREEN)
+        self._text(self._player_name(1).upper(), (69, 145), self.font, RED)
+        self._text(self._player_name(0).upper(), (69, 505), self.font, GREEN)
         legal = set(legal_actions(self.display_state)) if not self.current_step and not self.animation_steps else set()
         for pit in self.pits:
             is_legal = pit.index in legal
@@ -612,11 +723,11 @@ class SeedDuelApp:
         panel = pygame.Rect(855, 120, 210, 475)
         pygame.draw.rect(self.screen, PANEL, panel, border_radius=20)
         self._text("GAME STATUS", (875, 145), self.font, BROWN)
-        player_text = f"Player {self.display_state.player + 1} is playing..." if self.current_step else (
+        player_text = f"{self._player_name(self.display_state.player)} is playing..." if self.current_step else (
             "Game complete" if self.display_state.phase is Phase.GAME_END else
             "Choose Drop or Skip" if self.display_state.phase is Phase.DROP_SKIP else
             "Round complete" if self.display_state.phase is Phase.ROUND_END else
-            f"Player {self.display_state.player + 1}'s turn"
+            f"{self._player_name(self.display_state.player)}'s turn"
         )
         self._text(player_text, (875, 182), self.small_font, TEXT)
         self._text(f"P1 captured: {self.display_state.captured[0]}", (875, 222), self.small_font, GREEN)
@@ -649,7 +760,11 @@ class SeedDuelApp:
             for rect, label in buttons:
                 pygame.draw.rect(self.screen, BROWN, rect, border_radius=10)
                 self._center_text(label, rect, self.small_font, PANEL)
-        elif self.state.phase in (Phase.SELECT, Phase.DROP_SKIP) and not self.game_over:
+        elif (
+            self.state.phase in (Phase.SELECT, Phase.DROP_SKIP)
+            and not self.game_over
+            and self._algorithm_for_player(self.state.player) is None
+        ):
             if self.draw_offer:
                 buttons = ((self.accept_draw_rect, "Agree"), (self.decline_draw_rect, "Decline"))
             elif self.state.phase is Phase.DROP_SKIP:
