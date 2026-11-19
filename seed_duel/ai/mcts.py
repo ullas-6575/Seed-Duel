@@ -7,7 +7,12 @@ from math import log, sqrt
 import random
 
 from seed_duel.model import GameState, Phase
-from seed_duel.rules import apply_select_pit, legal_actions, round_earnings
+from seed_duel.rules import (
+    apply_protected_choice,
+    apply_select_pit,
+    legal_actions,
+    round_earnings,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,14 +23,22 @@ class MCTSRecommendation:
     iterations: int
 
 
+@dataclass(frozen=True, slots=True)
+class MCTSProtectedChoiceRecommendation:
+    drop: bool
+    visits: int
+    win_rate: float
+    iterations: int
+
+
 @dataclass(slots=True)
 class _Node:
     state: GameState
     parent: _Node | None = None
-    pit_index: int | None = None
+    action: int | bool | None = None
     visits: int = 0
     value: float = 0.0
-    untried: list[int] = field(default_factory=list)
+    untried: list[int | bool] = field(default_factory=list)
     children: list[_Node] = field(default_factory=list)
 
 
@@ -41,7 +54,52 @@ def recommend_move(
     ``win_rate`` is the estimated score fraction for the player at the root.
     A seed makes the randomized search repeatable.
     """
-    actions = legal_actions(state)
+    if state.phase is not Phase.SELECT or not legal_actions(state):
+        return None
+    best = _recommend_action(state, iterations, exploration, rollout_limit, seed)
+    if best is None:
+        return None
+    action, node = best
+    assert not isinstance(action, bool)
+    return MCTSRecommendation(
+        pit_index=action,
+        visits=node.visits,
+        win_rate=node.value / node.visits,
+        iterations=iterations,
+    )
+
+
+def recommend_protected_choice(
+    state: GameState,
+    iterations: int = 1000,
+    exploration: float = sqrt(2),
+    rollout_limit: int = 100,
+    seed: int | None = None,
+) -> MCTSProtectedChoiceRecommendation | None:
+    """Use MCTS to choose Drop or Skip at the current protected pit."""
+    if state.phase is not Phase.DROP_SKIP:
+        return None
+    best = _recommend_action(state, iterations, exploration, rollout_limit, seed)
+    if best is None:
+        return None
+    action, node = best
+    assert isinstance(action, bool)
+    return MCTSProtectedChoiceRecommendation(
+        drop=action,
+        visits=node.visits,
+        win_rate=node.value / node.visits,
+        iterations=iterations,
+    )
+
+
+def _recommend_action(
+    state: GameState,
+    iterations: int,
+    exploration: float,
+    rollout_limit: int,
+    seed: int | None,
+) -> tuple[int | bool, _Node] | None:
+    actions = _available_actions(state)
     if not actions:
         return None
     if iterations < 1 or rollout_limit < 1:
@@ -56,15 +114,15 @@ def recommend_move(
     for _ in range(iterations):
         node = root
 
-        while node.state.phase is not Phase.ROUND_END and not node.untried and node.children:
+        while node.state.phase not in (Phase.ROUND_END, Phase.GAME_END) and not node.untried and node.children:
             node = _select_child(node, root_player, exploration)
 
-        if node.state.phase is not Phase.ROUND_END and node.untried:
-            pit = rng.choice(node.untried)
-            node.untried.remove(pit)
-            child_state, _ = apply_select_pit(node.state, pit)
-            node = _Node(child_state, parent=node, pit_index=pit)
-            node.untried = list(legal_actions(child_state))
+        if node.state.phase not in (Phase.ROUND_END, Phase.GAME_END) and node.untried:
+            action = rng.choice(node.untried)
+            node.untried.remove(action)
+            child_state = _apply_action(node.state, action)
+            node = _Node(child_state, parent=node, action=action)
+            node.untried = list(_available_actions(child_state))
             node.parent.children.append(node)
 
         reward = _rollout(node.state, root_player, rollout_limit, rng)
@@ -74,12 +132,24 @@ def recommend_move(
             node = node.parent
 
     best = max(root.children, key=lambda child: (child.visits, child.value / child.visits))
-    return MCTSRecommendation(
-        pit_index=best.pit_index,
-        visits=best.visits,
-        win_rate=best.value / best.visits,
-        iterations=iterations,
-    )
+    assert best.action is not None
+    return best.action, best
+
+
+def _available_actions(state: GameState) -> tuple[int | bool, ...]:
+    if state.phase is Phase.DROP_SKIP:
+        return (True, False)
+    if state.phase is Phase.SELECT:
+        return legal_actions(state)
+    return ()
+
+
+def _apply_action(state: GameState, action: int | bool) -> GameState:
+    if state.phase is Phase.DROP_SKIP:
+        result, _ = apply_protected_choice(state, drop=bool(action))
+    else:
+        result, _ = apply_select_pit(state, int(action), auto_protected=False)
+    return result
 
 
 def _select_child(node: _Node, root_player: int, exploration: float) -> _Node:
@@ -98,12 +168,12 @@ def _rollout(state: GameState, root_player: int, limit: int, rng: random.Random)
     position = state
     # shortcut: score at the rollout limit; raise it if typical rounds exceed this depth.
     for _ in range(limit):
-        if position.phase is Phase.ROUND_END:
+        if position.phase in (Phase.ROUND_END, Phase.GAME_END):
             return _score_fraction(position, root_player)
-        actions = legal_actions(position)
+        actions = _available_actions(position)
         if not actions:
             return _score_fraction(position, root_player)
-        position, _ = apply_select_pit(position, rng.choice(actions))
+        position = _apply_action(position, rng.choice(actions))
     return _score_fraction(position, root_player)
 
 
@@ -116,6 +186,7 @@ def _score_fraction(state: GameState, root_player: int) -> float:
         scores = [state.captured[p] + state.reserves[p] for p in (0, 1)]
         for index, seeds in enumerate(state.pits):
             scores[state.owner_of(index)] += seeds
+        scores[state.player] += state.hand
     if state.initial_total == 0:
         return 0.5
     difference = scores[root_player] - scores[1 - root_player]

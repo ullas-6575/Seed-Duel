@@ -10,7 +10,7 @@
 
 ### Current implementation
 
-The Round-1 implementation provides `seed_duel.ai.choose_greedy_move(state)` as a deterministic one-turn easy agent, `seed_duel.ai.recommend_move(state, depth=3)` for minimax, and `seed_duel.ai.recommend_mcts_move(state, iterations=1000)` for Monte Carlo tree search. Greedy returns a legal pit directly; the advisors return a recommended legal pit. MCTS uses UCT selection and random complete-turn rollouts, with an optional seed for repeatable searches. The Pygame game offers two-player and AI-opponent modes: Easy uses Greedy, Medium uses MCTS, and Hard uses Minimax at depth 4. In-game Back returns to the previous setup page; Resign & Leave returns to the main mode selection. There is no experiment runner.
+The implementation provides `seed_duel.ai.choose_greedy_move(state)` as a deterministic easy agent, `seed_duel.ai.recommend_move(state, depth=3)` for minimax, and `seed_duel.ai.recommend_mcts_move(state, iterations=1000)` for Monte Carlo tree search. Each agent also exposes a protected-choice advisor that evaluates both Drop and Skip. Greedy looks ahead through at most six protected choices, MCTS includes both choices in selection and rollout, and Minimax keeps the same maximizing/minimizing player until the turn actually ends while applying a separate protected-decision bound. The Pygame game offers two-player and AI-opponent modes: Easy uses Greedy, Medium uses MCTS, and Hard uses Minimax at depth 4. In-game Back returns to the previous setup page; Resign & Leave returns to the main mode selection. There is no experiment runner.
 
 Easy/Medium/Hard are product labels to calibrate experimentally. Do not claim MCTS is inherently stronger than minimax or that a weighted score is automatically fuzzy logic.
 

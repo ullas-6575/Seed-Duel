@@ -49,7 +49,7 @@ On Windows, create the environment with `py -m venv .venv`. Activate it in Power
 - **Resign & Leave** returns to the main mode selection.
 - At the end of a round, click **Settle Round**, then choose **End Game** or **Continue**. End Game reports the score accumulated across settled rounds.
 - During a round, click **Propose Draw**. In two-player mode the other player can agree or decline; an AI opponent agrees automatically.
-- AI opponents automatically choose **Drop** when they encounter a protected pit. They do not search every possible Drop/Skip route for loops.
+- At every protected-pit encounter, AI opponents evaluate both **Drop** and **Skip**. Easy uses bounded greedy lookahead, Medium includes the choice in MCTS, and Hard includes it as a same-player minimax decision.
 
 ## Project layout
 
