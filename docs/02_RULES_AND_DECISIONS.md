@@ -38,6 +38,6 @@ Settlement runs once. Captures reset to zero after they enter the pool, and the 
 - Otherwise, players can end the game by agreement or continue into the prepared next round. The next round starter alternates.
 - A draw can be proposed during a round. The other human may agree or decline; an AI opponent agrees automatically.
 
-## Known AI limit
+## AI protected-pit decisions
 
-The AI evaluates pit selections with the existing greedy, MCTS, and minimax strategies. At protected pits it automatically chooses Drop; it does not search the alternative Skip route. Repetition detection covers the path actually played and is not an exhaustive proof over alternate routes.
+The AI evaluates both Drop and Skip at every protected-pit encounter. Greedy uses a bounded six-choice lookahead, MCTS treats both choices as tree actions and Minimax treats consecutive choices as decisions by the same player without consuming completed-turn depth. Minimax separately bounds protected-choice expansion to keep the UI responsive. Repetition detection still covers the path actually played; it is not an exhaustive proof that every alternate route loops.

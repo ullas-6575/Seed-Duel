@@ -12,9 +12,19 @@ from seed_duel.rules import (
     apply_protected_choice, apply_select_pit, begin_turn, initial_state,
     legal_actions, settle_round,
 )
-from seed_duel.ai.greedy import choose_move as choose_greedy_move
-from seed_duel.ai.mcts import recommend_move as recommend_mcts_move
-from seed_duel.ai.minimax import Recommendation, recommend_move
+from seed_duel.ai.greedy import (
+    choose_move as choose_greedy_move,
+    choose_protected_choice as choose_greedy_protected_choice,
+)
+from seed_duel.ai.mcts import (
+    recommend_move as recommend_mcts_move,
+    recommend_protected_choice as recommend_mcts_protected_choice,
+)
+from seed_duel.ai.minimax import (
+    Recommendation,
+    recommend_move,
+    recommend_protected_choice,
+)
 
 
 BACKGROUND = (244, 238, 224)
@@ -379,34 +389,55 @@ class SeedDuelApp:
             self.current_step = None
             if not self.animation_steps:
                 self.display_state = self.state
-                if self.ai_level and self.state.phase is Phase.SELECT and self.state.player == 1:
+                if (self.ai_level and self.state.player == 1
+                        and self.state.phase in (Phase.SELECT, Phase.DROP_SKIP)):
                     self._play_ai_turn()
                 else:
                     self.advice = recommend_move(self.state)
                     self.message = self.animation_message
 
     def _play_ai_turn(self) -> None:
-        if self.ai_level == "easy":
-            pit_index = choose_greedy_move(self.state)
-        elif self.ai_level == "medium":
-            result = recommend_mcts_move(self.state, iterations=250)
-            pit_index = result.pit_index if result else None
-        else:
-            result = recommend_move(self.state, depth=4)
-            pit_index = result.pit_index if result else None
-        if pit_index is None:
-            return
-
         before = self.state
-        self.state, events = apply_select_pit(self.state, pit_index)
+        decision_text: str
+        if self.state.phase is Phase.DROP_SKIP:
+            if self.ai_level == "easy":
+                drop = choose_greedy_protected_choice(self.state)
+            elif self.ai_level == "medium":
+                choice = recommend_mcts_protected_choice(self.state, iterations=250)
+                drop = choice.drop if choice else None
+            else:
+                choice = recommend_protected_choice(self.state, depth=4)
+                drop = choice.drop if choice else None
+            if drop is None:
+                return
+            self.state, events = apply_protected_choice(self.state, drop=drop)
+            decision_text = "Drop" if drop else "Skip"
+        else:
+            if self.ai_level == "easy":
+                pit_index = choose_greedy_move(self.state)
+            elif self.ai_level == "medium":
+                result = recommend_mcts_move(self.state, iterations=250)
+                pit_index = result.pit_index if result else None
+            else:
+                result = recommend_move(self.state, depth=4)
+                pit_index = result.pit_index if result else None
+            if pit_index is None:
+                return
+            self.state, events = apply_select_pit(
+                self.state, pit_index, auto_protected=False
+            )
+            decision_text = f"pit {pit_index + 1}"
+
         self.events.extend(events)
         self.advice = None
         if self.state.phase is Phase.ROUND_END:
             self.animation_message = "Round ended. Click Settle Round to calculate final totals."
+        elif self.state.phase is Phase.DROP_SKIP:
+            self.animation_message = "AI is evaluating Drop versus Skip..."
         else:
             self.animation_message = "Player 1: choose a highlighted pit."
         self._queue_turn_animation(before, self.state, events)
-        self.message = f"AI ({self.ai_level}) is choosing a pit..."
+        self.message = f"AI ({self.ai_level}) chose {decision_text}."
 
     def _draw(self) -> None:
         self.screen.fill(BACKGROUND)
