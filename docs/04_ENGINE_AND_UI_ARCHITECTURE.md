@@ -37,6 +37,7 @@ Keep generated caches and virtual environments out of Git. Keep useful fixtures 
 | `round_number` | Current round |
 | `initial_total` | Conservation target |
 | `rule_version` | Rules/decisions used for this match |
+| `loop_resolution_available` | Whether a later-round repeated path may be ended and settled from the human prompt |
 
 Use immutable or safely copied search states. Do not share mutable pit lists between search branches. Keep elapsed animation time and screen coordinates out of rule state.
 
@@ -64,7 +65,9 @@ Player actions include `SelectPit(index)`, `DropProtected` and `SkipProtected`. 
 | Current phase | Action or check | Next phase |
 | --- | --- | --- |
 | Select | Own normal nonempty pit selected | Pickup |
-| Pickup | Check repetition; transfer all seeds to hand | Sow |
+| Pickup | New checkpoint; transfer all seeds to hand | Sow |
+| Pickup | Repeated checkpoint in Round 1 | Round end |
+| Pickup | Repeated checkpoint in a later round | Human prompt: alternate last Drop/Skip or end and settle; AI has no dialog |
 | Sow | Advance to ordinary pit and drop one | Sow or inspect if hand empty |
 | Sow | Next destination is protected | Wait for Drop/Skip |
 | Drop/Skip | Drop spends one; Skip spends none | Continue sowing or inspect |
@@ -93,6 +96,7 @@ Example ordinary-turn events: select display pit 1; pickup 4; drop in pits 2–5
 - Mark protection with a lock/label as well as color. Ownership must be readable independently of the physical row.
 - Highlight only legal starting pits. During sowing, disable unrelated board clicks.
 - Pause at each protected-pit encounter for the acting human's Drop/Skip choice.
+- On a later-round human loop, show projected settlement totals and offer Try Alternate or End & Settle.
 - In AI mode, display the selected decision before continuing playback.
 - Offer Next Step, Auto, Pause, Speed, Restart and Exit.
 - Use a distinct Round Result and Game Winner screen.

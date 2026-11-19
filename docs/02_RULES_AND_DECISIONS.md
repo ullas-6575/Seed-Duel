@@ -17,11 +17,11 @@ Every time sowing reaches a protected pit, a human chooses:
 - **Drop:** put one seed in the protected pit and reduce the hand by one.
 - **Skip:** advance past the pit without reducing the hand.
 
-Each protected-pit encounter is a separate choice. Inspection and capture pass protected pits. The AI currently chooses Drop automatically.
+Each protected-pit encounter is a separate choice. Inspection and capture pass protected pits. Human players choose directly; every AI level evaluates both Drop and Skip.
 
 ## Round endings and repetition
 
-A round ends when the next player has no legal starting pit, the board is empty, a hand-empty checkpoint repeats within a turn, or a complete position repeats across turns. The in-turn key includes board, ownership, protection, accounts, player, and cursor. The between-turn key includes board, ownership, protection, captures, reserves, player, and next starter.
+A round ends when the next player has no legal starting pit, the board is empty, or a complete position repeats across turns. A repeated hand-empty checkpoint has two rule-specific outcomes: in Round 1 it ends the round. In later rounds, the repeated chosen path ends the current turn and creates a human-only resolution prompt. The prompt compares the exact P1/P2 totals if settled now with the immediate holdings projection from the opposite last Drop/Skip choice, then offers that alternative or immediate end-and-settlement. AI play has no prompt because its search evaluates Drop/Skip actions directly. If no human resolution is pending, play passes to the opponent; if that opponent has no legal start, the usual no-move rule ends the round. The in-turn key includes board, ownership, protection, accounts, player, and cursor. The between-turn key includes board, ownership, protection, captures, reserves, player, and next starter.
 
 After settlement, a previously settled complete position is a draw. The implementation detects repetition on the actual path; it does not prove that all alternate Drop/Skip routes also loop.
 
