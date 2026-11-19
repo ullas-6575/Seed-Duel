@@ -6,8 +6,27 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame
 
 from seed_duel.model import GameState, Phase
-from seed_duel.rules import apply_select_pit
+from seed_duel.rules import apply_protected_choice, apply_select_pit
 from seed_duel.ui.app import SeedDuelApp
+
+
+def later_loop_and_last_choice() -> tuple[GameState, GameState]:
+    state = GameState(
+        pits=(3, 1, 0, 1, 0, 0, 2, 1, 0, 0),
+        player=0,
+        captured=(12, 12),
+        reserves=(8, 0),
+        owners=(0, 0, 0, 0, 0, 0, 1, 1, 1, 0),
+        protected=(False, False, False, False, False, True, False, False, False, True),
+        initial_total=40,
+        round_number=2,
+    )
+    result, _ = apply_select_pit(state, 1, auto_protected=False)
+    last_choice = result
+    while result.phase is Phase.DROP_SKIP:
+        last_choice = result
+        result, _ = apply_protected_choice(result, drop=False)
+    return result, last_choice
 
 
 class UiAnimationTests(unittest.TestCase):
@@ -55,6 +74,44 @@ class UiAnimationTests(unittest.TestCase):
 
         self.assertTrue(any(event.kind == "ProtectedPitSkipped" for event in app.events))
         self.assertIn("Skip", app.message)
+
+    def test_human_loop_dialog_can_try_the_alternate_choice(self) -> None:
+        app = SeedDuelApp()
+        loop_state, checkpoint = later_loop_and_last_choice()
+        app.state = loop_state
+        app.display_state = loop_state
+        app.loop_avoid_state = checkpoint
+        app.loop_previous_choice = False
+
+        app._open_later_loop_dialog_if_available()
+
+        self.assertTrue(app.loop_choice_offer)
+        self.assertIn("Settling now gives", app.loop_dialog_message)
+        self.assertIn("currently projects", app.loop_dialog_message)
+        app._resolve_later_loop_offer(avoid=True)
+        self.assertFalse(app.loop_choice_offer)
+        self.assertIs(app.state.phase, Phase.SELECT)
+        self.assertFalse(app.state.loop_resolution_available)
+        self.assertTrue(
+            any(event.kind == "LoopAvoidanceSelected" for event in app.events)
+        )
+
+    def test_human_loop_dialog_can_end_and_settle_immediately(self) -> None:
+        app = SeedDuelApp()
+        loop_state, checkpoint = later_loop_and_last_choice()
+        app.state = loop_state
+        app.display_state = loop_state
+        app.loop_avoid_state = checkpoint
+        app.loop_previous_choice = False
+        app._open_later_loop_dialog_if_available()
+
+        app._resolve_later_loop_offer(avoid=False)
+
+        self.assertFalse(app.loop_choice_offer)
+        self.assertIn(app.state.phase, (Phase.ROUND_END, Phase.GAME_END))
+        self.assertFalse(app.state.loop_resolution_available)
+        self.assertGreater(sum(app.round_scores), 0)
+        self.assertTrue(any(event.kind == "SeedsSettled" for event in app.events))
 
 
 if __name__ == "__main__":

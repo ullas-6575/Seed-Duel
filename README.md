@@ -10,7 +10,7 @@ Seed Duel is a local Python and Pygame strategy game. Play against another perso
 - If the pit after your last seed contains seeds, pick them up and continue sowing.
 - If that next pit is empty, capture the seeds in the pit after it, then end your turn.
 - At a protected pit, choose **Drop** to place a seed there or **Skip** to pass it without spending a seed. Protected pits cannot be picked up or captured.
-- A round ends when the next player has no legal pit, the board is empty, or a position repeats. An exact repeated checkpoint during a turn also ends the round.
+- A round ends when the next player has no legal pit, the board is empty, or a complete position repeats across turns. A repeated in-turn checkpoint ends the whole round in Round 1. In later rounds, a human gets a dialog comparing the current settlement totals with the immediate projection from the opposite last Drop/Skip choice: try that alternative, or end and settle the round immediately. AI play does not show this dialog; its algorithms evaluate Drop/Skip choices directly.
 - Settle a round to pool each player's captures, reserve, and owned-pit seeds. Original owners get first chance to reclaim captured pits at four seeds each; remaining owned pits then refill in index order. Unfillable pits transfer to the other player and are protected until reclaimed. Remaining seeds stay in reserve. There is no donation.
 - After settlement, choose **End Game** or **Continue** by agreement. Owning all ten pits wins immediately. If neither player can move after settlement, pit ownership decides the result.
 

@@ -46,6 +46,7 @@ class GameState:
     round_positions: tuple[tuple[object, ...], ...] = ()
     settled_positions: tuple[tuple[object, ...], ...] = ()
     turn_seen: tuple[tuple[object, ...], ...] = ()
+    loop_resolution_available: bool = False
 
     def evolve(self, **changes: object) -> "GameState":
         return replace(self, **changes)

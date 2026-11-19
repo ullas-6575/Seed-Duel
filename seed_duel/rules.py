@@ -51,9 +51,52 @@ def _next_normal(state: GameState, index: int) -> int | None:
 
 
 def _end_round(state: GameState, reason: str) -> tuple[GameState, tuple[Event, ...]]:
-    result = state.evolve(phase=Phase.ROUND_END, terminal_reason=reason, hand=0, pending_protected=None)
+    result = state.evolve(
+        phase=Phase.ROUND_END,
+        terminal_reason=reason,
+        hand=0,
+        pending_protected=None,
+        loop_resolution_available=False,
+    )
     result.assert_conserved()
     return result, (Event.create("RoundEnded", reason=reason),)
+
+
+def _end_later_round_turn_on_cycle(
+    state: GameState,
+    pits: tuple[int, ...],
+    cursor: int,
+) -> tuple[GameState, tuple[Event, ...]]:
+    """End only the current turn when a later-round chosen path repeats."""
+    player = state.player
+    result = state.evolve(
+        pits=pits,
+        player=1 - player,
+        phase=Phase.SELECT,
+        hand=0,
+        cursor=cursor,
+        pending_protected=None,
+        turn_seen=(),
+        loop_resolution_available=True,
+    )
+    key = position_key(result)
+    repeated_between_turns = key in state.round_positions
+    result = result.evolve(round_positions=state.round_positions + (key,))
+    events: list[Event] = [Event.create("CycleDetected", cursor=cursor, outcome="turn_ended")]
+
+    if not any(pits):
+        ended, end_events = _end_round(result, "empty_board")
+        return ended, tuple(events + list(end_events))
+    if repeated_between_turns:
+        ended, end_events = _end_round(result, "repeated_position")
+        return ended, tuple(events + [Event.create("PositionRepeated")] + list(end_events))
+    if not legal_actions(result):
+        ended, end_events = _end_round(result, "no_legal_start")
+        return ended, tuple(events + list(end_events))
+
+    result.assert_conserved()
+    events.append(Event.create("TurnEnded", player=player, reason="chosen_path_repeat"))
+    return result, tuple(events)
 
 
 def begin_turn(state: GameState) -> tuple[GameState, tuple[Event, ...]]:
@@ -69,10 +112,19 @@ def begin_turn(state: GameState) -> tuple[GameState, tuple[Event, ...]]:
 def apply_select_pit(
     state: GameState, index: int, *, auto_protected: bool = True
 ) -> tuple[GameState, tuple[Event, ...]]:
-    """Resolve a turn; the AI simulation uses a fixed Drop choice at protected pits."""
+    """Resolve until the turn ends or a protected choice needs an answer.
+
+    ``auto_protected`` is a deterministic Drop shortcut for simple headless
+    callers. Interactive play and AI search pass False and branch explicitly.
+    """
     if index not in legal_actions(state):
         return state, (Event.create("IllegalAction", index=index),)
-    started = state.evolve(cursor=index, hand=0, turn_seen=())
+    started = state.evolve(
+        cursor=index,
+        hand=0,
+        turn_seen=(),
+        loop_resolution_available=False,
+    )
     events = [Event.create("PitSelected", index=index, player=state.player)]
     return _continue_turn(started, events, auto_protected)
 
@@ -91,7 +143,7 @@ def apply_protected_choice(state: GameState, drop: bool) -> tuple[GameState, tup
         event = Event.create("ProtectedPitSkipped", index=index, remaining_hand=hand)
     updated = state.evolve(
         pits=tuple(pits), hand=hand, cursor=cursor, phase=Phase.SELECT,
-        pending_protected=None,
+        pending_protected=None, loop_resolution_available=False,
     )
     return _continue_turn(updated, [event], False, start_at_pickup=False)
 
@@ -109,8 +161,21 @@ def _continue_turn(
             key = (tuple(pits), state.owners, state.protected, state.captured,
                    state.reserves, player, cursor)
             if key in seen:
-                ended, end_events = _end_round(state.evolve(pits=tuple(pits), cursor=cursor), "in_turn_repeat")
-                return ended, tuple(events + [Event.create("CycleDetected", cursor=cursor)] + list(end_events))
+                repeated_pits = tuple(pits)
+                if state.round_number > 1:
+                    ended, end_events = _end_later_round_turn_on_cycle(
+                        state, repeated_pits, cursor
+                    )
+                    return ended, tuple(events + list(end_events))
+                ended, end_events = _end_round(
+                    state.evolve(pits=repeated_pits, cursor=cursor),
+                    "in_turn_repeat",
+                )
+                return ended, tuple(
+                    events
+                    + [Event.create("CycleDetected", cursor=cursor, outcome="round_ended")]
+                    + list(end_events)
+                )
             seen.add(key)
             hand = pits[cursor]
             pits[cursor] = 0
@@ -121,7 +186,7 @@ def _continue_turn(
             target = (cursor + 1) % len(pits)
             if state.is_protected(target):
                 if auto_protected:
-                    # shortcut: AI fixes Drop; add choice branching when searching Skip routes.
+                    # Deterministic shortcut for callers that do not model choices.
                     pits[target] += 1
                     hand -= 1
                     cursor = target
@@ -165,6 +230,7 @@ def _continue_turn(
             pits=tuple(pits), captured=tuple(captured), hand=0, cursor=cursor,
             player=next_player, phase=Phase.SELECT, pending_protected=None,
             turn_seen=(),
+            loop_resolution_available=False,
         )
         key = position_key(result)
         repeated = key in state.round_positions
@@ -227,6 +293,7 @@ def settle_round(state: GameState) -> tuple[GameState, tuple[Event, ...]]:
         round_starter=next_player,
         phase=Phase.ROUND_END, terminal_reason="settled", pending_protected=None,
         round_positions=(), turn_seen=(),
+        loop_resolution_available=False,
     )
 
     if owners and (all(owner == 0 for owner in owners) or all(owner == 1 for owner in owners)):
@@ -253,3 +320,16 @@ def settle_round(state: GameState) -> tuple[GameState, tuple[Event, ...]]:
                 events.append(Event.create("TerritoryResult", player=winner if winner is not None else "draw"))
     settled.assert_conserved()
     return settled, tuple(events)
+
+
+def end_round_after_later_cycle(
+    state: GameState,
+) -> tuple[GameState, tuple[Event, ...]]:
+    """Accept settlement after a human-visible later-round cycle prompt."""
+    if (
+        state.round_number <= 1
+        or state.phase is not Phase.SELECT
+        or not state.loop_resolution_available
+    ):
+        raise ValueError("No later-round cycle is available to settle")
+    return _end_round(state, "later_loop_settled")
