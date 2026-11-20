@@ -651,24 +651,24 @@ class SeedDuelApp:
         if self.menu_page == "mode":
             prompt = "Choose a game mode  (1, 2 or 3)"
             options = (
-                (self.two_player_rect, "1   Human vs Human"),
-                (self.ai_opponent_rect, "2   Human vs AI"),
-                (self.ai_vs_ai_rect, "3   AI vs AI"),
+                (self.two_player_rect, "Human vs Human"),
+                (self.ai_opponent_rect, "Human vs AI"),
+                (self.ai_vs_ai_rect, "AI vs AI"),
             )
         elif self.menu_page == "level":
             prompt = "Choose AI difficulty  (1, 2 or 3)"
             options = (
-                (self.easy_rect, "1   Easy  —  Greedy"),
-                (self.medium_rect, "2   Medium  —  Monte Carlo Tree Search"),
-                (self.hard_rect, "3   Hard  —  Minimax"),
+                (self.easy_rect, "Easy  —  Greedy"),
+                (self.medium_rect, "Medium  —  Monte Carlo Tree Search"),
+                (self.hard_rect, "Hard  —  Minimax"),
                 (self.back_rect, "Back  (Esc or 0)"),
             )
         else:
             prompt = "Choose an AI matchup  (1, 2 or 3)"
             options = (
-                (self.easy_rect, "1   MCTS vs Minimax Alpha-Beta"),
-                (self.medium_rect, "2   Greedy vs MCTS"),
-                (self.hard_rect, "3   Greedy vs Minimax Alpha-Beta"),
+                (self.easy_rect, "MCTS vs Minimax Alpha-Beta"),
+                (self.medium_rect, "Greedy vs MCTS"),
+                (self.hard_rect, "Greedy vs Minimax Alpha-Beta"),
                 (self.back_rect, "Back  (Esc or 0)"),
             )
         text = self.font.render(prompt, True, MUTED)
