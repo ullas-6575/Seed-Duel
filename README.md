@@ -59,6 +59,16 @@ Run the automated tests with:
 python -m unittest discover -s tests
 ```
 
+## Run with Docker
+
+Build and start the game from the project folder:
+
+```bash
+docker compose up --build
+```
+
+The container provides a virtual display and noVNC, so it does not need access to the host's desktop server. Open [http://localhost:6080/vnc.html?autoconnect=1](http://localhost:6080/vnc.html?autoconnect=1) in a browser to play. The port is bound to localhost. Stop the game with `Ctrl+C`.
+
 ## Project structure
 
 - `main.py` — application entry point
@@ -66,4 +76,5 @@ python -m unittest discover -s tests
 - `seed_duel/rules.py` — legal actions, turn transitions, repetition, and settlement
 - `seed_duel/ai/` — Greedy, MCTS, and Minimax agents
 - `seed_duel/ui/app.py` — Pygame menus, board, controls, and event animations
+- `Dockerfile`, `compose.yaml`, `docker-entrypoint.sh` — container image and browser-based display
 - `tests/` — automated rules, AI, and UI tests
