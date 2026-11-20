@@ -8,6 +8,7 @@ Seed Duel is a local, turn-based seed-sowing strategy game built with Python and
 
 - Human vs Human, Human vs AI, and AI vs AI game modes.
 - Three AI opponents: Greedy, Monte Carlo Tree Search (MCTS), and Minimax Alpha-Beta.
+- On-demand AI suggestion (**Hint** lightbulb button) limited to 3 uses per player per round.
 - Seed sowing, captures, protected pits, and round settlement with pit ownership changes.
 - Repetition detection and round/game end conditions.
 - Draw proposals in human games and end-of-round controls.
@@ -16,42 +17,130 @@ Seed Duel is a local, turn-based seed-sowing strategy game built with Python and
 
 ## Game Modes
 
-- **Human vs Human:** Two players take turns on the same computer.
-- **Human vs AI:** Player 1 is human and Player 2 is controlled by the selected AI.
-- **AI vs AI:** Select a matchup and watch both agents play. The first listed agent controls Player 1.
+When you launch Seed Duel, you start on the **Main Menu** where you choose how you want to play (click a button or press `1`, `2`, or `3`):
 
-## How to Play
+- **Human vs Human (`1`):** Two players take turns on the same computer.
+- **Human vs AI (`2`):** Player 1 is human and Player 2 is controlled by the selected AI.
+- **AI vs AI (`3`):** Select a matchup and watch both agents play. The first listed agent controls Player 1.
 
-The board has ten pits, five per player, and begins with four seeds in each pit. Player 1 starts. On your turn, choose a highlighted, non-empty pit that you own. Pick up all its seeds and sow them one at a time around the board.
+**Screen Type: Main Menu**
 
-When your hand is empty, inspect the next normal pit, skipping protected pits. If it contains seeds, pick them up and continue sowing. If it is empty, capture the seeds from the next normal pit and end your turn. An empty capture target awards no seeds. Protected pits cannot be selected as starting pits, picked up during relaying, or captured.
+![Seed Duel main menu](screenshots/Screenshot%20from%202026-11-21%2000-04-35.png)
 
-When sowing reaches a protected pit, choose **Drop** to put one seed into it, or **Skip** to pass over it without using a seed. Make a choice each time you encounter a protected pit.
+## How to Play (Step-by-Step Guide)
 
-### Rounds and winning
+### 1. Board Setup & What to Do First
 
-- A round ends when the board is empty, the next player has no legal starting pit, or a complete between-turn position repeats.
-- If a hand-empty checkpoint repeats during a turn in Round 1, the round ends. In later rounds, the turn ends. At the final protected-pit choice, a human may try the opposite **Drop** or **Skip** action, or end and settle the round. If the alternate action repeats, the prompt appears again. The prompt compares current settlement totals with the immediate projection from the alternate action. AI agents evaluate both choices automatically. Repetition detection follows the path actually played and does not establish that every alternate path loops.
-- At settlement, each player pools their captured seeds, reserve, and seeds in pits they own. Original owners reclaim lost pits they can afford at four seeds per pit, then each player refills their other owned pits at four seeds per pit. An unfilled pit transfers to the other player. Any remaining seeds stay in reserve.
-- Pits held by someone other than their original owner are protected. Settlement has no donation step, and the total number of seeds is conserved.
-- The next round starter alternates. A player who owns all ten pits after settlement wins. If neither player has a legal move after settlement, the player who owns more pits wins; equal pit counts result in a draw. Reaching a previously settled complete position also ends the game in a draw.
-- After settlement, choose **End Game** to finish by agreement or **Continue** to play the prepared next round. The final score reports each player's pooled totals across settled rounds. During a round, a draw can be proposed; the other human can accept or decline, and an AI opponent accepts automatically.
+The board has ten pits arranged in a ring—five per player (`1–5` along the bottom row for Player 1, and `6–10` right-to-left along the top row for Player 2)—and begins with four seeds in each pit (40 seeds total). Player 1 starts.
+
+- **Reading the board & Game Status panel:**
+  - Each pit shows its pit number at the top, its current seed count at the bottom, and an ownership badge above it (`P1` in green, `P2` in red, or `P1 L` / `P2 L` when locked/protected).
+  - The right-hand **Game Status** panel tracks whose turn it is, captured seeds for each player, total conserved seeds (`40 / 40`), reserves, pits owned, active AI hint details (when requested), and the **Latest events** log.
+- **What to do:** On your turn, click any **highlighted, non-empty pit** that you own (`P1` for Player 1, `P2` for Player 2).
+- **What happens:** You pick up all the seeds from that pit and sow them one at a time counter-clockwise (`1 → 2 → … → 10 → 1`) around the board.
+- **Draws & Controls:** At any time during a human round, you can click **Propose Draw** (or use **Restart**, **Back**, or **Resign & Leave**). In Human vs Human, the other player clicks **Agree** or **Decline**; in Human vs AI, the draw is agreed immediately. When a draw is agreed, the game ends and prompts you to press **Restart** to play again.
+
+**Screen Type: Human vs Human Gameplay (Starting Board & Draw Agreement)**
+
+![Seed Duel Human vs Human gameplay](screenshots/Screenshot%20from%202026-11-21%2000-06-03.png)
+
+### 2. Relaying, Capturing & Ending Your Turn
+
+- Before picking up seeds, the engine checks for a repeated state.
+- Seeds are dropped one at a time advancing around the board until your hand is empty.
+- When your hand becomes empty, the game inspects the **next normal pit** (skipping over protected pits):
+  - **If it contains seeds:** Pick them up automatically and continue sowing (relaying).
+  - **If it is empty:** Capture all seeds from the **next normal pit** beyond the empty pit, and your turn ends (switching to the other player). An empty capture target awards no seeds.
+- If the next player has no non-empty owned pit, or a complete state repeats, the **round ends** and proceeds to settlement.
+- Protected pits (marked with `L`) cannot be selected as starting pits, picked up during relaying, or captured.
+
+**Diagram Type: Turn Flow (Sowing, Relaying, Capturing & Round End)**
+
+![Seed Duel turn flow diagram](screenshots/Screenshot%20from%202026-11-21%2000-27-56.png)
+
+### 3. Protected Pits (Drop or Skip)
+
+When sowing reaches a protected pit (labeled `P1 L` or `P2 L`), the game pauses and asks you what to do next:
+
+- Choose **Drop** to place one seed into the protected pit.
+- Choose **Skip** to pass over it without using a seed.
+
+Make a choice each time your sowing encounters a protected pit.
+
+### 4. On-Demand AI Hint (Idea Bulb)
+
+During a human player's turn (in both Human vs AI and Human vs Human), AI suggestions do **not** appear automatically.
+
+- **What to do:** Click the **Hint** lightbulb button in the top bar during your pit-selection turn if you want the AI (Minimax, depth 3) to recommend a move.
+- **What happens:** The suggested pit is highlighted with a pulsing blue ring on the board, the **Game Status** panel displays the suggested pit and its Minimax score, and the message bar confirms the recommendation and remaining hints.
+- **Limit:** Each player can use the AI suggestion **at most 3 times per round** (`Hint 3/3` → `Hint 2/3` → `Hint 1/3` → `Hint 0/3`). Clicking **Hint** again on the same turn while a suggestion is already active does not consume an extra hint. The counter resets to `3/3` at the start of each new round or game.
+
+### 5. Rounds, Settlement & Winning (What to Do Next)
+
+- **When a round ends:** A round ends when the board is empty, the next player has no legal starting pit, no normal (unprotected) pits remain, or a complete between-turn position repeats.
+- **In-turn loops:** If a hand-empty checkpoint repeats during a turn in Round 1, the round ends. In later rounds, the turn ends. At the final protected-pit choice, a **Later-Round Loop Detected** dialog lets a human **Try Drop** / **Try Skip** (the opposite action from that checkpoint) or **End & Settle** the round immediately. If the alternate action repeats, the prompt appears again. The prompt compares current settlement totals with the immediate projection from the alternate action. AI agents evaluate both choices automatically. Repetition detection follows the path actually played and does not establish that every alternate path loops.
+- **What to do at round end:** Click **Settle Round** to calculate totals and prepare the board for the next round.
+- **How settlement works:**
+  - Each player pools their captured seeds, reserve, and seeds in pits they own.
+  - Original owners first reclaim lost pits they can afford at four seeds per pit (reclaimed pits are refilled to four seeds and are no longer protected).
+  - Each player then refills their remaining owned pits at four seeds per pit.
+  - **Capturing an opponent's pit:** If a player cannot fill one of their pits, the opponent can only capture and take ownership of that pit if they have enough remaining seeds to **fill the pit fully** (four seeds placed into that pit). If the opponent cannot fill it completely, ownership does not change. Captured pits held by someone other than their original owner become **protected** (`L`).
+  - **Fair remainder rule:** Any remaining seeds that neither player could use to fill a full pit are given back to the board—filling any remaining unfilled pits first (and distributing round-robin if any remain)—leaving reserves at `0 / 0` while conserving all 40 seeds.
+- **Next round or end game:**
+  - A round lead builds territory across rounds; the round result is not the final game result until the conquest goal is met or players choose to end.
+  - The next round starter alternates.
+  - A player who owns all ten pits after settlement wins immediately (**conquest**).
+  - If neither player has a legal move after settlement, the player who owns more pits wins; equal pit counts result in a draw.
+  - Reaching a previously settled complete position also ends the game in a draw.
+  - Otherwise, after settlement, choose **End Game** to finish by agreement or **Continue** to play the prepared next round (in Human vs Human, the other player confirms with **Agree** or **Decline**; in AI modes it applies immediately). The final score reports each player's pooled totals across settled rounds.
+  - During a round, a draw can be proposed; the other human can accept or decline, and an AI opponent accepts automatically.
+
+**Diagram Type: Round Settlement & Multi-Round Conquest Flow**
+
+![Seed Duel round settlement and conquest flow diagram](screenshots/Screenshot%20from%202026-11-21%2000-36-16.png)
 
 ## AI Opponents
 
-Choose **Play Against AI** and select a difficulty:
+### Human vs AI (Difficulty Selection)
 
-- **Easy — Greedy:** Deterministic heuristic move selection with lookahead through up to six protected-pit choices.
-- **Medium — MCTS:** Monte Carlo Tree Search with 250 iterations per decision, including Drop/Skip choices.
-- **Hard — Minimax Alpha-Beta:** Searches four completed turns ahead, treats protected-pit choices as decisions by the same player, and uses alpha-beta pruning with a separate bound on protected-choice search.
+From the Main Menu, choose **Human vs AI** (`2`) and then select a difficulty (`1`, `2`, or `3`, or press `Esc` / `0` to go back):
 
-Available AI matchups are **MCTS vs Minimax Alpha-Beta**, **Greedy vs MCTS**, and **Greedy vs Minimax Alpha-Beta**. Both agents choose pits and protected-pit actions automatically.
+- **Easy — Greedy:** Deterministic heuristic move selection with lookahead through up to six protected-pit choices (five additional choices during protected-pit decisions; ties keep the first pit in ring order / Drop).
+- **Medium — Monte Carlo Tree Search (MCTS):** UCT search with 250 iterations per decision and random rollouts up to 100 steps, including Drop/Skip choices.
+- **Hard — Minimax (Minimax Alpha-Beta):** Searches four completed turns ahead, treats protected-pit choices as decisions by the same player, and uses alpha-beta pruning with a separate bound on protected-choice search (up to eight protected choices per search).
+
+**Screen Type: AI Difficulty Selection**
+
+![AI difficulty selection screen](screenshots/Screenshot%20from%202026-11-21%2000-04-43.png)
+
+**Screen Type: Human vs AI Gameplay with On-Demand AI Hint (Lightbulb Button)**
+
+![Seed Duel Human vs AI gameplay with AI hint](screenshots/Screenshot%20from%202026-11-21%2000-05-18.png)
+
+### AI vs AI (Matchup Selection & Spectating)
+
+From the Main Menu, choose **AI vs AI** (`3`) to pick one of the available matchups:
+
+- **MCTS vs Minimax Alpha-Beta**
+- **Greedy vs MCTS**
+- **Greedy vs Minimax Alpha-Beta**
+
+**Screen Type: AI Matchup Selection**
+
+![AI matchup selection screen](screenshots/Screenshot%20from%202026-11-21%2000-04-29.png)
+
+Once a matchup starts, both agents choose pits and protected-pit actions automatically while you watch the animated moves, protected pit badges (such as `P2 L`), and the live event log. At round end, click **Settle Round**, then **Continue** or **End Game**.
+
+**Screen Type: AI vs AI Gameplay (Later Round with Protected Pit & Drop Action)**
+
+![Seed Duel AI vs AI gameplay](screenshots/Screenshot%20from%202026-11-21%2000-00-26.png)
 
 ## Controls
 
-- Use the mouse to select menu options, legal pits, and buttons. Menu options can also be selected with their displayed number keys. Press `Esc` or `0` to return from a submenu.
-- **Restart** starts the current mode or matchup over. **Back** returns to the previous setup page. **Resign & Leave** returns to the mode selection screen.
-- During a round, select **Propose Draw** to offer a draw. At round end, select **Settle Round**, then choose **End Game** or **Continue**.
+- Use the mouse to select menu options, legal pits, and buttons. Menu options can also be selected with their displayed number keys (`1`, `2`, `3`). Press `Esc` or `0` to return from a submenu.
+- **Hint (lightbulb icon)** requests an on-demand AI move suggestion during your pit-selection turn (up to 3 per player per round).
+- **Restart** starts the current mode, difficulty, or matchup over from Round 1. **Back** returns to the previous setup page. **Resign & Leave** returns directly to the Main Menu.
+- During a round, select **Propose Draw** to offer a draw (confirmed with **Agree** / **Decline** in Human vs Human). When encountering a protected pit, select **Drop** or **Skip**. If a later-round loop dialog appears, choose **Try Drop** / **Try Skip** or **End & Settle**. At round end, select **Settle Round**, then choose **End Game** or **Continue**.
 
 ## Installation
 
@@ -110,12 +199,18 @@ After completing the local installation, start the game with:
 python main.py
 ```
 
-Use the mouse to select menu options and pits. Menu options may also be selected with the displayed number keys; press `Esc` or `0` to go back from a submenu. During play, choose a highlighted pit you own. When sowing reaches a protected pit, choose **Drop** or **Skip**. Use **Restart**, **Back**, or **Resign & Leave** as needed. At round end, settle the round and choose whether to continue or end the game.
+Use the mouse to select menu options and pits. Menu options may also be selected with the displayed number keys; press `Esc` or `0` to go back from a submenu. During play, choose a highlighted pit you own. When sowing reaches a protected pit, choose **Drop** or **Skip**. Use **Hint**, **Restart**, **Back**, or **Resign & Leave** as needed. At round end, settle the round and choose whether to continue or end the game.
 
-To run the automated test suite locally:
+To run the automated test suite locally (23 unit tests covering rules, AI, and UI):
 
 ```bash
 python -m unittest discover -s tests
+```
+
+You can also run a quick headless engine demo with:
+
+```bash
+python -m seed_duel
 ```
 
 ## Technologies Used
@@ -127,30 +222,6 @@ python -m unittest discover -s tests
 - **Container display:** Xvfb, x11vnc, noVNC, and websockify
 - **Testing:** Python `unittest`
 
-## Screenshots
-
-Screenshots of the menus and gameplay are shown below. Each link points to the supplied image in the `screenshots/` folder.
-
-### Main menu
-
-![Seed Duel main menu](screenshots/Screenshot%202026-11-20%20155149.png)
-
-### AI difficulty selection
-
-![AI difficulty selection screen](screenshots/Screenshot%202026-11-20%20155244.png)
-
-### AI matchup selection
-
-![AI matchup selection screen](screenshots/Screenshot%202026-11-20%20155158.png)
-
-### Human vs Human gameplay
-
-![Seed Duel Human vs Human gameplay](screenshots/Screenshot%202026-11-20%20155303.png)
-
-### AI vs AI gameplay
-
-![Seed Duel AI vs AI gameplay](screenshots/Screenshot%202026-11-20%20155218.png)
-
 ## Project Structure
 
 ```text
@@ -160,7 +231,7 @@ Seed-Duel/
 │   ├── ui/                 # Pygame menus, board, and event animations
 │   ├── model.py            # Shared game state, phases, and events
 │   └── rules.py            # Legal actions, turns, repetition, and settlement
-├── screenshots/            # README UI screenshots
+├── screenshots/            # README UI screenshots and gameplay diagrams
 ├── tests/                  # Rules, AI, and UI tests
 ├── compose.yaml            # Docker Compose service
 ├── Dockerfile              # Container image definition

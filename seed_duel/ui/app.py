@@ -27,8 +27,8 @@ from seed_duel.ai.minimax import (
 )
 
 
-BACKGROUND = (244, 238, 224)
-PANEL = (255, 251, 242)
+BACKGROUND = (252, 244, 232)
+PANEL = (255, 252, 247)
 BROWN = (71, 43, 25)
 GOLD = (150, 88, 38)
 GOLD_LIGHT = (209, 143, 69)
@@ -62,6 +62,12 @@ AI_MATCHUPS = (
     ("greedy", "mcts"),
     ("greedy", "minimax"),
 )
+MAX_HINTS_PER_ROUND = 3
+BOARD_RECT = pygame.Rect(40, 120, 790, 430)
+PLAYER_LABEL_POSITIONS = {
+    0: (69, 365),
+    1: (69, 140),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,7 +100,8 @@ class SeedDuelApp:
         self.small_font = pygame.font.SysFont("arial", 16)
         self.state = initial_state()
         self.display_state = self.state
-        self.advice: Recommendation | None = recommend_move(self.state)
+        self.advice: Recommendation | None = None
+        self.hints_remaining = [MAX_HINTS_PER_ROUND, MAX_HINTS_PER_ROUND]
         self.game_started = False
         self.menu_page = "mode"
         self.menu_history: list[str] = []
@@ -124,6 +131,7 @@ class SeedDuelApp:
         self.medium_rect = pygame.Rect(300, 345, 500, 65)
         self.hard_rect = pygame.Rect(300, 430, 500, 65)
         self.back_rect = pygame.Rect(300, 515, 500, 50)
+        self.hint_rect = pygame.Rect(522, 29, 120, 42)
         self.back_game_rect = pygame.Rect(650, 29, 85, 42)
         self.resign_rect = pygame.Rect(743, 29, 145, 42)
         self.restart_rect = pygame.Rect(896, 29, 160, 42)
@@ -228,7 +236,8 @@ class SeedDuelApp:
         self.game_started = True
         self.state = initial_state()
         self.display_state = self.state
-        self.advice = recommend_move(self.state)
+        self.advice = None
+        self.hints_remaining = [MAX_HINTS_PER_ROUND, MAX_HINTS_PER_ROUND]
         self.events = []
         self.animation_steps = []
         self.current_step = None
@@ -253,7 +262,8 @@ class SeedDuelApp:
             self.menu_history.clear()
         self.state = initial_state()
         self.display_state = self.state
-        self.advice = recommend_move(self.state)
+        self.advice = None
+        self.hints_remaining = [MAX_HINTS_PER_ROUND, MAX_HINTS_PER_ROUND]
         self.events = []
         self.animation_steps = []
         self.current_step = None
@@ -322,6 +332,9 @@ class SeedDuelApp:
             self.state.phase in (Phase.SELECT, Phase.DROP_SKIP)
             and self._algorithm_for_player(self.state.player) is not None
         ):
+            return
+        if self._can_request_hint() and self.hint_rect.collidepoint(pos):
+            self._request_ai_hint()
             return
         if self.state.phase is Phase.SELECT and self.draw_rect.collidepoint(pos):
             if self.ai_level:
@@ -406,7 +419,8 @@ class SeedDuelApp:
         )
         self.state, _ = begin_turn(self.state)
         self.display_state = self.state
-        self.advice = recommend_move(self.state)
+        self.advice = None
+        self.hints_remaining = [MAX_HINTS_PER_ROUND, MAX_HINTS_PER_ROUND]
         self.events = []
         self.message = f"Round {self.state.round_number}: Player {self.state.player + 1}, choose a highlighted pit."
         if (
@@ -575,7 +589,7 @@ class SeedDuelApp:
                 ):
                     self._play_ai_turn()
                 else:
-                    self.advice = recommend_move(self.state)
+                    self.advice = None
                     self.message = self.animation_message
 
     def _play_ai_turn(self) -> None:
@@ -692,6 +706,8 @@ class SeedDuelApp:
             ),
             (44, 69),
         )
+        if self._can_request_hint():
+            self._draw_hint_button()
         pygame.draw.rect(self.screen, BROWN, self.back_game_rect, border_radius=10)
         self._center_text("Back", self.back_game_rect, self.small_font, PANEL)
         pygame.draw.rect(self.screen, RED, self.resign_rect, border_radius=10)
@@ -699,13 +715,70 @@ class SeedDuelApp:
         pygame.draw.rect(self.screen, BROWN, self.restart_rect, border_radius=10)
         self._center_text("Restart", self.restart_rect, self.font, PANEL)
 
+    def _can_request_hint(self) -> bool:
+        return (
+            self.game_started
+            and not self.game_over
+            and not self.current_step
+            and not self.animation_steps
+            and not self.draw_offer
+            and self.round_choice_offer is None
+            and not self.loop_choice_offer
+            and self.state.phase is Phase.SELECT
+            and self._algorithm_for_player(self.state.player) is None
+        )
+
+    def _request_ai_hint(self) -> None:
+        if not self._can_request_hint():
+            return
+        if self.advice is not None:
+            return
+        player = self.state.player
+        if self.hints_remaining[player] <= 0:
+            self.message = f"Player {player + 1}: no AI suggestions left this round."
+            return
+        recommendation = recommend_move(self.state)
+        if recommendation is None:
+            return
+        self.advice = recommendation
+        self.hints_remaining[player] -= 1
+        remaining = self.hints_remaining[player]
+        self.message = (
+            f"AI suggests Pit {recommendation.pit_index + 1} "
+            f"({remaining} suggestion{'s' if remaining != 1 else ''} left this round)."
+        )
+
+    def _draw_hint_button(self) -> None:
+        remaining = self.hints_remaining[self.state.player]
+        active = self.advice is not None
+        bg = ADVISOR if active else (GOLD if remaining > 0 else MUTED)
+        pygame.draw.rect(self.screen, bg, self.hint_rect, border_radius=10)
+        # Draw lightbulb icon on the left side of the button
+        cx = self.hint_rect.x + 24
+        cy = self.hint_rect.centery - 3
+        bulb_color = (255, 232, 110) if (remaining > 0 or active) else (210, 200, 185)
+        pygame.draw.circle(self.screen, bulb_color, (cx, cy), 8)
+        pygame.draw.rect(self.screen, bulb_color, pygame.Rect(cx - 4, cy + 5, 8, 5), border_radius=2)
+        pygame.draw.rect(self.screen, BROWN, pygame.Rect(cx - 4, cy + 10, 8, 3), border_radius=1)
+        if remaining > 0 or active:
+            for dx1, dy1, dx2, dy2 in (
+                (0, -11, 0, -14),
+                (-9, -8, -11, -10),
+                (9, -8, 11, -10),
+                (-11, 0, -14, 0),
+                (11, 0, 14, 0),
+            ):
+                pygame.draw.line(self.screen, bulb_color, (cx + dx1, cy + dy1), (cx + dx2, cy + dy2), 2)
+        text_rect = pygame.Rect(self.hint_rect.x + 40, self.hint_rect.y, self.hint_rect.width - 44, self.hint_rect.height)
+        self._center_text(f"Hint {remaining}/{MAX_HINTS_PER_ROUND}", text_rect, self.small_font, PANEL)
+
     def _draw_board(self) -> None:
-        board = pygame.Rect(40, 120, 790, 430)
+        board = BOARD_RECT
         pygame.draw.rect(self.screen, (190, 174, 148), board.move(0, 6), border_radius=24)
         pygame.draw.rect(self.screen, FELT, board, border_radius=24)
         pygame.draw.rect(self.screen, (141, 160, 123), board, 2, border_radius=24)
-        self._text(self._player_name(1).upper(), (69, 145), self.font, RED)
-        self._text(self._player_name(0).upper(), (69, 505), self.font, GREEN)
+        self._text(self._player_name(1).upper(), PLAYER_LABEL_POSITIONS[1], self.font, RED)
+        self._text(self._player_name(0).upper(), PLAYER_LABEL_POSITIONS[0], self.font, GREEN)
         legal = set(legal_actions(self.display_state)) if not self.current_step and not self.animation_steps else set()
         for pit in self.pits:
             is_legal = pit.index in legal

@@ -7,7 +7,7 @@ import pygame
 
 from seed_duel.model import GameState, Phase
 from seed_duel.rules import apply_protected_choice, apply_select_pit
-from seed_duel.ui.app import SeedDuelApp
+from seed_duel.ui.app import BOARD_RECT, PLAYER_LABEL_POSITIONS, SeedDuelApp
 
 
 def later_loop_and_last_choice() -> tuple[GameState, GameState]:
@@ -112,6 +112,60 @@ class UiAnimationTests(unittest.TestCase):
         self.assertFalse(app.state.loop_resolution_available)
         self.assertGreater(sum(app.round_scores), 0)
         self.assertTrue(any(event.kind == "SeedsSettled" for event in app.events))
+
+    def test_player_board_labels_are_visible_and_do_not_overlap_pits(self) -> None:
+        app = SeedDuelApp()
+        for matchup in (None, ("mcts", "minimax"), ("greedy", "minimax")):
+            app.ai_matchup = matchup
+            for player in (0, 1):
+                label = app._player_name(player).upper()
+                width, height = app.font.size(label)
+                x, y = PLAYER_LABEL_POSITIONS[player]
+                label_rect = pygame.Rect(x, y, width, height)
+                self.assertTrue(BOARD_RECT.contains(label_rect))
+                for pit in app.pits:
+                    shadow_rect = pit.rect.move(0, 10)
+                    marker_rect = pygame.Rect(pit.center[0] - 22, pit.rect.y - 13, 44, 20)
+                    self.assertFalse(label_rect.colliderect(pit.rect))
+                    self.assertFalse(label_rect.colliderect(shadow_rect))
+                    self.assertFalse(label_rect.colliderect(marker_rect))
+
+    def test_ai_hint_is_manual_and_limited_to_three_per_round(self) -> None:
+        app = SeedDuelApp()
+        app._start_game(ai_level="easy")
+
+        # Advice does not appear automatically.
+        self.assertIsNone(app.advice)
+        self.assertEqual(app.hints_remaining, [3, 3])
+
+        # Clicking the hint button once gives advice and consumes 1 hint.
+        app._handle_click(app.hint_rect.center)
+        self.assertIsNotNone(app.advice)
+        self.assertEqual(app.hints_remaining[0], 2)
+
+        # Clicking again on the same turn does not consume another hint.
+        app._handle_click(app.hint_rect.center)
+        self.assertEqual(app.hints_remaining[0], 2)
+
+        # Consume remaining 2 hints on subsequent turns in the same round.
+        app.advice = None
+        app._handle_click(app.hint_rect.center)
+        self.assertEqual(app.hints_remaining[0], 1)
+        app.advice = None
+        app._handle_click(app.hint_rect.center)
+        self.assertEqual(app.hints_remaining[0], 0)
+
+        # 4th request in the same round is blocked.
+        app.advice = None
+        app._handle_click(app.hint_rect.center)
+        self.assertIsNone(app.advice)
+        self.assertEqual(app.hints_remaining[0], 0)
+        self.assertIn("no AI suggestions left", app.message)
+
+        # Continuing to a new round resets hints to 3.
+        app._apply_round_choice("continue")
+        self.assertIsNone(app.advice)
+        self.assertEqual(app.hints_remaining, [3, 3])
 
 
 if __name__ == "__main__":
