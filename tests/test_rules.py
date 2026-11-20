@@ -58,9 +58,24 @@ class RulesTests(unittest.TestCase):
         self.assertEqual(events[0].kind, "RoundEnded")
         settled, _ = settle_round(ended)
 
-        self.assertEqual(settled.pits, (4, 4, 4, 4, 0, 4, 4, 4, 4, 4))
+        self.assertEqual(settled.pits, (4, 4, 4, 4, 4, 4, 4, 4, 4, 4))
         self.assertEqual(settled.captured, (0, 0))
-        self.assertEqual(settled.reserves, (2, 2))
+        self.assertEqual(settled.reserves, (0, 0))
+        self.assertEqual(settled.owners, (0, 0, 0, 0, 0, 1, 1, 1, 1, 1))
+        self.assertFalse(settled.protected[4])
+        settled.assert_conserved()
+
+    def test_opponent_captures_pit_only_when_able_to_fill_it_fully(self) -> None:
+        state = GameState(
+            pits=(0, 0, 0, 0, 0, 2, 1, 3, 0, 4), player=0,
+            captured=(16, 14), initial_total=40,
+        )
+        ended, _ = begin_turn(state)
+        settled, _ = settle_round(ended)
+
+        self.assertEqual(settled.pits, (4, 4, 4, 4, 4, 4, 4, 4, 4, 4))
+        self.assertEqual(settled.captured, (0, 0))
+        self.assertEqual(settled.reserves, (0, 0))
         self.assertEqual(settled.owners, (0, 0, 0, 0, 1, 1, 1, 1, 1, 1))
         self.assertTrue(settled.protected[4])
         settled.assert_conserved()

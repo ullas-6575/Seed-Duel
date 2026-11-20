@@ -275,6 +275,7 @@ def settle_round(state: GameState) -> tuple[GameState, tuple[Event, ...]]:
                 events.append(Event.create("PitReclaimed", index=i, owner=player))
 
     previous_owners = tuple(owners)
+    unfilled: list[tuple[int, int]] = []
     for player in (0, 1):
         for i in range(len(pits)):
             if previous_owners[i] != player or i in reclaimed:
@@ -283,9 +284,33 @@ def settle_round(state: GameState) -> tuple[GameState, tuple[Event, ...]]:
                 pits[i] = state.seeds_per_pit
                 funds[player] -= state.seeds_per_pit
             else:
-                owners[i] = 1 - player
-                protected[i] = owners[i] != state.original_owner_of(i)
-                events.append(Event.create("OwnershipChanged", index=i, owner=owners[i]))
+                unfilled.append((i, player))
+
+    # To capture an opponent's unfilled pit, the opponent must fill it fully.
+    still_unfilled: list[int] = []
+    for i, current_owner in unfilled:
+        other = 1 - current_owner
+        if funds[other] >= state.seeds_per_pit:
+            owners[i] = other
+            protected[i] = owners[i] != state.original_owner_of(i)
+            pits[i] = state.seeds_per_pit
+            funds[other] -= state.seeds_per_pit
+            events.append(Event.create("OwnershipChanged", index=i, owner=other))
+        else:
+            still_unfilled.append(i)
+
+    # Give any remaining seeds away to the board so play continues fairly.
+    remainder = funds[0] + funds[1]
+    funds = [0, 0]
+    for i in still_unfilled:
+        if remainder <= 0:
+            break
+        add = min(state.seeds_per_pit - pits[i], remainder)
+        pits[i] += add
+        remainder -= add
+    if remainder > 0 and pits:
+        for step in range(remainder):
+            pits[step % len(pits)] += 1
     next_player = 1 - state.round_starter
     settled = state.evolve(
         pits=tuple(pits), owners=tuple(owners), protected=tuple(protected),
