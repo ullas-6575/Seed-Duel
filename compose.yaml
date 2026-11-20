@@ -1,0 +1,7 @@
+services:
+  seed-duel:
+    build: .
+    image: seed-duel
+    ports:
+      - "127.0.0.1:6080:6080"
+    init: true
