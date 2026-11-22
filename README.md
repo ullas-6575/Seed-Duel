@@ -7,6 +7,7 @@ Seed Duel is a local, turn-based seed-sowing strategy game built with Python and
 ## Features
 
 - Human vs Human, Human vs AI, and AI vs AI game modes.
+- Two selectable board sizes: **Standard (5 pits × 4 seeds, 40 seeds total)** and **Small (4 pits × 3 seeds, 24 seeds total)**.
 - Three AI opponents: Greedy, Monte Carlo Tree Search (MCTS), and Minimax Alpha-Beta.
 - On-demand AI suggestion (**Hint** lightbulb button) limited to 3 uses per player per round.
 - Built-in sound chimes and visual highlights notifying human players when it is their turn to play or choose **Drop** / **Skip** (with a mute toggle button and `M` shortcut).
@@ -23,6 +24,7 @@ When you launch Seed Duel, you start on the **Main Menu** where you choose how y
 - **Human vs Human (`1`):** Two players take turns on the same computer.
 - **Human vs AI (`2`):** Player 1 is human and Player 2 is controlled by the selected AI.
 - **AI vs AI (`3`):** Select a matchup and watch both agents play. The first listed agent controls Player 1.
+- **Board size (`S` to toggle):** Choose between **Standard (5 pits × 4)** (10 pits, 40 seeds) and **Small (4 pits × 3)** (8 pits, 24 seeds) at the bottom of the Main Menu—all rules, AI levels, hints, and notifications work identically on both sizes. You can also launch directly with the smaller board via `python main.py --small`.
 
 **Screen Type: Main Menu**
 
@@ -37,7 +39,10 @@ The board has ten pits arranged in a ring—five per player (`1–5` along the b
 - **Reading the board & Game Status panel:**
   - Each pit shows its pit number at the top, its current seed count at the bottom, and an ownership badge above it (`P1` in green or `P2` in red). Locked/protected pits also show a padlock, and consecutive locked pits are joined by a chain.
   - The right-hand **Game Status** panel tracks whose turn it is, total conserved seeds (`40 / 40`), reserves, pits owned, and active AI hint details (when requested). Each player has a separate **Account pit** in this panel; captured seeds visibly fly into the correct account and its count updates when the animation lands.
-- **What to do:** When it becomes your turn, the game plays a soft two-note chime and briefly highlights the footer message box in green. Click any **highlighted, non-empty pit** that you own (`P1` for Player 1, `P2` for Player 2).
+- **What to do:** When it becomes your turn, the game plays a soft two‑note chime and briefly highlights the footer message box in green, notifying you that you may now select a pit.
+
+> **Sound Notification:** This turn‑start chime can be muted via the speaker icon or the `M` shortcut.
+
 - **What happens:** You pick up all the seeds from that pit and sow them one at a time counter-clockwise (`1 → 2 → … → 10 → 1`) around the board.
 - **Draws & Controls:** At any time during a human round, you can click **Propose Draw** (or use **Restart**, **Back**, or **Resign & Leave**). In Human vs Human, the other player clicks **Agree** or **Decline**; in Human vs AI, the draw is agreed immediately. When a draw is agreed, the game ends and prompts you to press **Restart** to play again.
 
@@ -61,10 +66,14 @@ The board has ten pits arranged in a ring—five per player (`1–5` along the b
 
 ### 3. Protected Pits (Drop or Skip)
 
-When sowing reaches a protected pit (marked with a padlock), the game pauses, plays a distinct three-tone alert chime, pulses a gold border around the footer message box, and highlights the **Drop** and **Skip** buttons to ask you what to do next:
+When sowing reaches a protected pit (marked with a padlock), the game pauses, plays a distinct three‑tone alert chime, pulses a gold border around the footer message box, and highlights the **Drop** and **Skip** buttons to ask you what to do next:
 
 - Choose **Drop** to place one seed into the protected pit.
 - Choose **Skip** to pass over it without using a seed.
+
+> **Sound Notification:** A gentle three‑tone chime alerts the player that a protected‑pit decision is required. The sound can be muted or unmuted with the speaker icon in the UI or by pressing **`M`**.
+
+![Protected pit notification](/media/ullas-biswas-shontu/New Volume/code/Seed-Duel/screenshots/Screenshot%20from%202026-11-21%2000-00-26.png)
 
 Make a choice each time your sowing encounters a protected pit.
 
@@ -83,14 +92,14 @@ During a human player's turn (in both Human vs AI and Human vs Human), AI sugges
 - **What to do at round end:** Click **Settle Round** to calculate totals and prepare the board for the next round.
 - **How settlement works:**
   - Each player pools their captured seeds, reserve, and seeds in pits they own.
-  - Original owners first reclaim lost pits they can afford at four seeds per pit, peeling back an invasion from its inner edge toward the boundary so remaining protected pits stay contiguous (reclaimed pits are refilled to four seeds and are no longer protected).
-  - Each player then refills their remaining owned pits at four seeds per pit.
-  - **Capturing an opponent's pit:** If a player cannot fill one of their pits, the opponent can only capture and take ownership of it if they have enough remaining seeds to **fill the pit fully** (four seeds placed into that pit). An invasion starts at either boundary of the opponent's original territory and expands consecutively from that same side; it cannot jump over a filled pit to capture an isolated interior pit. Captured pits held by someone other than their original owner become **protected**, display a padlock, and adjacent protected pits are joined by a chain.
-  - **Fair remainder rule:** Any remaining seeds that neither player could use to fill a full pit are given back to the board—filling any remaining unfilled pits first (and distributing round-robin if any remain)—leaving reserves at `0 / 0` while conserving all 40 seeds.
+  - Original owners first reclaim lost pits they can afford at the starting fill cost per pit (`4` seeds in Standard 5×4, `3` seeds in Small 4×3), peeling back an invasion from its inner edge toward the boundary so remaining protected pits stay contiguous (reclaimed pits are refilled to full and are no longer protected).
+  - Each player then refills their remaining owned pits at the starting fill cost per pit (`4` seeds in 5×4, `3` seeds in 4×3).
+  - **Capturing an opponent's pit:** If a player cannot fill one of their pits, the opponent can only capture and take ownership of it if they have enough remaining seeds to **fill the pit fully** (`4` seeds placed into that pit in Standard 5×4; `3` seeds in Small 4×3). An invasion starts at either boundary of the opponent's original territory and expands consecutively from that same side; it cannot jump over a filled pit to capture an isolated interior pit. Captured pits held by someone other than their original owner become **protected**, display a padlock, and adjacent protected pits are joined by a chain.
+  - **Fair remainder rule:** Any remaining seeds that neither player could use to fill a full pit are given back to the board—filling any remaining unfilled pits first (and distributing round-robin if any remain)—leaving reserves at `0 / 0` while conserving all seeds (`40` in Standard 5×4, `24` in Small 4×3).
 - **Next round or end game:**
   - A round lead builds territory across rounds; the round result is not the final game result until the conquest goal is met or players choose to end.
   - The next round starter alternates.
-  - A player who owns all ten pits after settlement wins immediately (**conquest**).
+  - A player who owns all pits after settlement (`10` in Standard 5×4, `8` in Small 4×3) wins immediately (**conquest**).
   - If neither player has a legal move after settlement, the player who owns more pits wins; equal pit counts result in a draw.
   - Otherwise, after settlement, choose **End Game** to finish by agreement or **Continue** to play the prepared next round (in Human vs Human, the other player confirms with **Agree** or **Decline**; in AI modes it applies immediately). The final score reports each player's pooled totals across settled rounds.
   - During a round, a draw can be proposed; the other human can accept or decline, and an AI opponent accepts automatically.
@@ -204,7 +213,7 @@ python main.py
 
 Use the mouse to select menu options and pits. Menu options may also be selected with the displayed number keys; press `Esc` or `0` to go back from a submenu. During play, choose a highlighted pit you own. When sowing reaches a protected pit, choose **Drop** or **Skip**. Use the **Sound** toggle (`M`), **Hint**, **Restart**, **Back**, or **Resign & Leave** as needed. At round end, settle the round and choose whether to continue or end the game.
 
-To run the automated test suite locally (36 unit tests covering rules, AI strategy, and UI):
+To run the automated test suite locally (38 unit tests covering rules, AI strategy, and UI):
 
 ```bash
 python -m unittest discover -s tests

@@ -227,6 +227,74 @@ class RulesTests(unittest.TestCase):
         self.assertEqual(events[-1].kind, "TurnEnded")
         result.assert_conserved()
 
+    def test_small_four_pit_three_seed_variant_rules_and_settlement(self) -> None:
+        state = initial_state(pits_per_player=4, seeds_per_pit=3)
+        self.assertEqual(len(state.pits), 8)
+        self.assertEqual(state.pits, (3,) * 8)
+        self.assertEqual(state.initial_total, 24)
+        self.assertEqual(state.seeds_per_pit, 3)
+        self.assertEqual(legal_actions(state), (0, 1, 2, 3))
+
+        after, _ = apply_select_pit(state, 0, auto_protected=False)
+        after.assert_conserved()
+        self.assertEqual(after.player, 1)
+
+        # Settlement with 4 pits x 3 seeds: P2 has 15 seeds (3 extra = 1 full pit),
+        # so P2 captures P1's boundary pit and fills it with 3 seeds (not 4).
+        round_end = GameState(
+            pits=(0, 0, 0, 0, 0, 1, 2, 0),
+            player=0,
+            captured=(9, 12),
+            owners=(0, 0, 0, 0, 1, 1, 1, 1),
+            protected=(False,) * 8,
+            initial_total=24,
+            seeds_per_pit=3,
+        )
+        ended, _ = begin_turn(round_end)
+        settled, _ = settle_round(ended)
+        self.assertEqual(settled.pits, (3,) * 8)
+        self.assertEqual(settled.reserves, (0, 0))
+        self.assertEqual(settled.owners.count(0), 3)
+        self.assertEqual(settled.owners.count(1), 5)
+        self.assertEqual(sum(settled.protected), 1)
+        settled.assert_conserved()
+
+        # With only 2 extra seeds (14 vs 10), P2 cannot fill a 3-seed pit, so no capture occurs.
+        no_capture_end = GameState(
+            pits=(0, 0, 0, 0, 0, 2, 0, 0),
+            player=0,
+            captured=(10, 12),
+            owners=(0, 0, 0, 0, 1, 1, 1, 1),
+            protected=(False,) * 8,
+            initial_total=24,
+            seeds_per_pit=3,
+        )
+        ended2, _ = begin_turn(no_capture_end)
+        settled2, _ = settle_round(ended2)
+        self.assertEqual(settled2.pits, (3,) * 8)
+        self.assertEqual(settled2.owners, (0, 0, 0, 0, 1, 1, 1, 1))
+        self.assertEqual(settled2.protected, (False,) * 8)
+        settled2.assert_conserved()
+
+        # Full conquest in 4x3: 24 seeds fills all 8 pits with 3 seeds each.
+        conquest_end = GameState(
+            pits=(0, 0, 0, 0, 0, 0, 0, 0),
+            player=0,
+            captured=(24, 0),
+            owners=(0, 0, 0, 0, 1, 1, 1, 1),
+            protected=(False,) * 8,
+            initial_total=24,
+            seeds_per_pit=3,
+        )
+        ended3, _ = begin_turn(conquest_end)
+        settled3, _ = settle_round(ended3)
+        self.assertIs(settled3.phase, Phase.GAME_END)
+        self.assertEqual(settled3.terminal_reason, "conquest")
+        self.assertEqual(settled3.winner, 0)
+        self.assertEqual(settled3.pits, (3,) * 8)
+        self.assertEqual(settled3.owners, (0,) * 8)
+        settled3.assert_conserved()
+
 
 if __name__ == "__main__":
     unittest.main()

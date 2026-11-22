@@ -124,7 +124,7 @@ def _synthesize_chime(
 
 
 class SeedDuelApp:
-    def __init__(self) -> None:
+    def __init__(self, pits_per_player: int = 5, seeds_per_pit: int = 4) -> None:
         pygame.init()
         pygame.display.set_caption("Seed Duel")
         self.screen = pygame.display.set_mode((1100, 720))
@@ -132,7 +132,9 @@ class SeedDuelApp:
         self.title_font = pygame.font.SysFont("arial", 32, bold=True)
         self.font = pygame.font.SysFont("arial", 20)
         self.small_font = pygame.font.SysFont("arial", 16)
-        self.state = initial_state()
+        self.pits_per_player = pits_per_player
+        self.seeds_per_pit = seeds_per_pit
+        self.state = initial_state(self.pits_per_player, self.seeds_per_pit)
         self.display_state = self.state
         self.advice: Recommendation | None = None
         self.hints_remaining = [MAX_HINTS_PER_ROUND, MAX_HINTS_PER_ROUND]
@@ -161,10 +163,12 @@ class SeedDuelApp:
         self.prompt_notice_until = 0
         self.game_over = False
         self.running = True
-        self.pits = self._make_pit_views()
+        self.pits = self._make_pit_views(self.pits_per_player)
         self.two_player_rect = pygame.Rect(300, 300, 500, 70)
         self.ai_opponent_rect = pygame.Rect(300, 390, 500, 70)
         self.ai_vs_ai_rect = pygame.Rect(300, 480, 500, 70)
+        self.standard_size_rect = pygame.Rect(300, 586, 242, 46)
+        self.small_size_rect = pygame.Rect(558, 586, 242, 46)
         self.easy_rect = pygame.Rect(300, 260, 500, 65)
         self.medium_rect = pygame.Rect(300, 345, 500, 65)
         self.hard_rect = pygame.Rect(300, 430, 500, 65)
@@ -228,16 +232,29 @@ class SeedDuelApp:
         self.prompt_notice_until = 0
 
     @staticmethod
-    def _make_pit_views() -> tuple[PitView, ...]:
+    def _make_pit_views(pits_per_player: int = 5) -> tuple[PitView, ...]:
         positions: dict[int, tuple[int, int]] = {}
-        for offset, index in enumerate(range(5)):
-            positions[index] = (160 + offset * 138, 465)
-        for offset, index in enumerate(range(9, 4, -1)):
-            positions[index] = (160 + offset * 138, 240)
+        if pits_per_player == 5:
+            step = 138
+            start_x = 160
+        else:
+            step = min(160, (BOARD_RECT.width - 140) // max(1, pits_per_player - 1)) if pits_per_player > 1 else 0
+            start_x = BOARD_RECT.centerx - (step * (pits_per_player - 1)) // 2
+        for offset, index in enumerate(range(pits_per_player)):
+            positions[index] = (start_x + offset * step, 465)
+        for offset, index in enumerate(range(2 * pits_per_player - 1, pits_per_player - 1, -1)):
+            positions[index] = (start_x + offset * step, 240)
         return tuple(
             PitView(index, center, pygame.Rect(center[0] - 58, center[1] - 58, 116, 116))
             for index, center in positions.items()
         )
+
+    def _set_board_variant(self, pits_per_player: int, seeds_per_pit: int) -> None:
+        self.pits_per_player = pits_per_player
+        self.seeds_per_pit = seeds_per_pit
+        self.state = initial_state(self.pits_per_player, self.seeds_per_pit)
+        self.display_state = self.state
+        self.pits = self._make_pit_views(self.pits_per_player)
 
     def run(self) -> None:
         while self.running:
@@ -267,6 +284,11 @@ class SeedDuelApp:
                 self._open_menu_page("level")
             elif key == pygame.K_3:
                 self._open_menu_page("matchup")
+            elif key == pygame.K_s:
+                if (self.pits_per_player, self.seeds_per_pit) == (4, 3):
+                    self._set_board_variant(5, 4)
+                else:
+                    self._set_board_variant(4, 3)
         elif key == pygame.K_ESCAPE or key == pygame.K_0:
             self._go_back()
         elif key in (pygame.K_1, pygame.K_2, pygame.K_3):
@@ -284,6 +306,10 @@ class SeedDuelApp:
                 self._open_menu_page("level")
             elif self.ai_vs_ai_rect.collidepoint(pos):
                 self._open_menu_page("matchup")
+            elif self.standard_size_rect.collidepoint(pos):
+                self._set_board_variant(5, 4)
+            elif self.small_size_rect.collidepoint(pos):
+                self._set_board_variant(4, 3)
         elif self.back_rect.collidepoint(pos):
             self._go_back()
         elif self.easy_rect.collidepoint(pos):
@@ -319,8 +345,9 @@ class SeedDuelApp:
         self.ai_level = ai_level
         self.ai_matchup = ai_matchup
         self.game_started = True
-        self.state = initial_state()
+        self.state = initial_state(self.pits_per_player, self.seeds_per_pit)
         self.display_state = self.state
+        self.pits = self._make_pit_views(self.pits_per_player)
         self.advice = None
         self.hints_remaining = [MAX_HINTS_PER_ROUND, MAX_HINTS_PER_ROUND]
         self.events = []
@@ -348,8 +375,9 @@ class SeedDuelApp:
         self.ai_matchup = None
         if clear_history:
             self.menu_history.clear()
-        self.state = initial_state()
+        self.state = initial_state(self.pits_per_player, self.seeds_per_pit)
         self.display_state = self.state
+        self.pits = self._make_pit_views(self.pits_per_player)
         self.advice = None
         self.hints_remaining = [MAX_HINTS_PER_ROUND, MAX_HINTS_PER_ROUND]
         self.events = []
@@ -806,6 +834,19 @@ class SeedDuelApp:
         for rect, label in options:
             pygame.draw.rect(self.screen, BROWN, rect, border_radius=12)
             self._center_text(label, rect, self.font, PANEL)
+        if self.menu_page == "mode":
+            size_label = self.small_font.render("Board size  (S to toggle)", True, MUTED)
+            self.screen.blit(size_label, size_label.get_rect(center=(550, 566)))
+            variants = (
+                (self.standard_size_rect, "Standard (5 pits × 4)", (5, 4)),
+                (self.small_size_rect, "Small (4 pits × 3)", (4, 3)),
+            )
+            current = (self.pits_per_player, self.seeds_per_pit)
+            for rect, label, variant in variants:
+                selected = current == variant
+                pygame.draw.rect(self.screen, GREEN if selected else PANEL, rect, border_radius=10)
+                pygame.draw.rect(self.screen, BROWN, rect, 2, border_radius=10)
+                self._center_text(label, rect, self.small_font, PANEL if selected else BROWN)
 
     def _draw_header(self) -> None:
         self.screen.blit(self.title_font.render("SEED DUEL", True, BROWN), (42, 28))
@@ -816,9 +857,10 @@ class SeedDuelApp:
             if self.ai_level is not None
             else "Human vs Human"
         )
+        size_tag = f" • {self.pits_per_player}×{self.seeds_per_pit}"
         self.screen.blit(
             self.small_font.render(
-                f"Round {self.state.round_number} • {mode}", True, MUTED
+                f"Round {self.state.round_number} • {mode}{size_tag}", True, MUTED
             ),
             (44, 69),
         )
@@ -1264,5 +1306,5 @@ class SeedDuelApp:
             self._text(line, (rect.x, rect.y + row * 27), font, color)
 
 
-def run() -> None:
-    SeedDuelApp().run()
+def run(pits_per_player: int = 5, seeds_per_pit: int = 4) -> None:
+    SeedDuelApp(pits_per_player=pits_per_player, seeds_per_pit=seeds_per_pit).run()

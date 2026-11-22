@@ -259,6 +259,48 @@ class UiAnimationTests(unittest.TestCase):
         app._start_game(ai_matchup=("greedy", "mcts"))
         self.assertEqual(played, ["play", "drop_skip"])
 
+    def test_small_four_pit_three_seed_variant_ui_and_modes(self) -> None:
+        app = SeedDuelApp()
+        # Select Small (4 pits x 3) on the Main Menu.
+        app._handle_click(app.small_size_rect.center)
+        self.assertEqual((app.pits_per_player, app.seeds_per_pit), (4, 3))
+        self.assertEqual(len(app.pits), 8)
+        self.assertEqual(app.state.pits, (3,) * 8)
+        self.assertEqual(app.state.initial_total, 24)
+
+        # Start Human vs AI on the small board and verify layout & labels.
+        app._start_game(ai_level="medium")
+        self.assertEqual(len(app.pits), 8)
+        self.assertEqual(app.state.initial_total, 24)
+        for pit in app.pits:
+            self.assertTrue(BOARD_RECT.contains(pit.rect))
+        for player in (0, 1):
+            label = app._player_name(player).upper()
+            width, height = app.font.size(label)
+            x, y = PLAYER_LABEL_POSITIONS[player]
+            label_rect = pygame.Rect(x, y, width, height)
+            self.assertTrue(BOARD_RECT.contains(label_rect))
+            for pit in app.pits:
+                self.assertFalse(label_rect.colliderect(pit.rect))
+
+        # Hint and draw work cleanly on the 4x3 board.
+        app._handle_click(app.hint_rect.center)
+        self.assertIsNotNone(app.advice)
+        self.assertIn(app.advice.pit_index, (0, 1, 2, 3))
+        app._draw()
+
+        # Restart keeps the 4x3 board size.
+        app._handle_click(app.restart_rect.center)
+        self.assertEqual(len(app.pits), 8)
+        self.assertEqual(app.state.pits, (3,) * 8)
+        self.assertEqual(app.state.initial_total, 24)
+
+        # AI vs AI works on the 4x3 board.
+        app._start_game(ai_matchup=("greedy", "minimax"))
+        self.assertEqual(len(app.pits), 8)
+        self.assertTrue(app.events)
+        app._draw()
+
 
 if __name__ == "__main__":
     unittest.main()
