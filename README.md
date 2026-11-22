@@ -34,8 +34,8 @@ When you launch Seed Duel, you start on the **Main Menu** where you choose how y
 The board has ten pits arranged in a ring—five per player (`1–5` along the bottom row for Player 1, and `6–10` right-to-left along the top row for Player 2)—and begins with four seeds in each pit (40 seeds total). Player 1 starts.
 
 - **Reading the board & Game Status panel:**
-  - Each pit shows its pit number at the top, its current seed count at the bottom, and an ownership badge above it (`P1` in green, `P2` in red, or `P1 L` / `P2 L` when locked/protected).
-  - The right-hand **Game Status** panel tracks whose turn it is, captured seeds for each player, total conserved seeds (`40 / 40`), reserves, pits owned, active AI hint details (when requested), and the **Latest events** log.
+  - Each pit shows its pit number at the top, its current seed count at the bottom, and an ownership badge above it (`P1` in green or `P2` in red). Locked/protected pits also show a padlock, and consecutive locked pits are joined by a chain.
+  - The right-hand **Game Status** panel tracks whose turn it is, total conserved seeds (`40 / 40`), reserves, pits owned, and active AI hint details (when requested). Each player has a separate **Account pit** in this panel; captured seeds visibly fly into the correct account and its count updates when the animation lands.
 - **What to do:** On your turn, click any **highlighted, non-empty pit** that you own (`P1` for Player 1, `P2` for Player 2).
 - **What happens:** You pick up all the seeds from that pit and sow them one at a time counter-clockwise (`1 → 2 → … → 10 → 1`) around the board.
 - **Draws & Controls:** At any time during a human round, you can click **Propose Draw** (or use **Restart**, **Back**, or **Resign & Leave**). In Human vs Human, the other player clicks **Agree** or **Decline**; in Human vs AI, the draw is agreed immediately. When a draw is agreed, the game ends and prompts you to press **Restart** to play again.
@@ -60,7 +60,7 @@ The board has ten pits arranged in a ring—five per player (`1–5` along the b
 
 ### 3. Protected Pits (Drop or Skip)
 
-When sowing reaches a protected pit (labeled `P1 L` or `P2 L`), the game pauses and asks you what to do next:
+When sowing reaches a protected pit (marked with a padlock), the game pauses and asks you what to do next:
 
 - Choose **Drop** to place one seed into the protected pit.
 - Choose **Skip** to pass over it without using a seed.
@@ -84,14 +84,13 @@ During a human player's turn (in both Human vs AI and Human vs Human), AI sugges
   - Each player pools their captured seeds, reserve, and seeds in pits they own.
   - Original owners first reclaim lost pits they can afford at four seeds per pit (reclaimed pits are refilled to four seeds and are no longer protected).
   - Each player then refills their remaining owned pits at four seeds per pit.
-  - **Capturing an opponent's pit:** If a player cannot fill one of their pits, the opponent can only capture and take ownership of that pit if they have enough remaining seeds to **fill the pit fully** (four seeds placed into that pit). If the opponent cannot fill it completely, ownership does not change. Captured pits held by someone other than their original owner become **protected** (`L`).
+  - **Capturing an opponent's pit:** If a player cannot fill one of their pits, the opponent can only capture and take ownership of it if they have enough remaining seeds to **fill the pit fully** (four seeds placed into that pit). An invasion starts at either boundary of the opponent's original territory and expands consecutively from that same side; it cannot jump over a filled pit to capture an isolated interior pit. Captured pits held by someone other than their original owner become **protected**, display a padlock, and adjacent protected pits are joined by a chain.
   - **Fair remainder rule:** Any remaining seeds that neither player could use to fill a full pit are given back to the board—filling any remaining unfilled pits first (and distributing round-robin if any remain)—leaving reserves at `0 / 0` while conserving all 40 seeds.
 - **Next round or end game:**
   - A round lead builds territory across rounds; the round result is not the final game result until the conquest goal is met or players choose to end.
   - The next round starter alternates.
   - A player who owns all ten pits after settlement wins immediately (**conquest**).
   - If neither player has a legal move after settlement, the player who owns more pits wins; equal pit counts result in a draw.
-  - Reaching a previously settled complete position also ends the game in a draw.
   - Otherwise, after settlement, choose **End Game** to finish by agreement or **Continue** to play the prepared next round (in Human vs Human, the other player confirms with **Agree** or **Decline**; in AI modes it applies immediately). The final score reports each player's pooled totals across settled rounds.
   - During a round, a draw can be proposed; the other human can accept or decline, and an AI opponent accepts automatically.
 
@@ -106,8 +105,10 @@ During a human player's turn (in both Human vs AI and Human vs Human), AI sugges
 From the Main Menu, choose **Human vs AI** (`2`) and then select a difficulty (`1`, `2`, or `3`, or press `Esc` / `0` to go back):
 
 - **Easy — Greedy:** Deterministic heuristic move selection with lookahead through up to six protected-pit choices (five additional choices during protected-pit decisions; ties keep the first pit in ring order / Drop).
-- **Medium — Monte Carlo Tree Search (MCTS):** UCT search with 250 iterations per decision and random rollouts up to 100 steps, including Drop/Skip choices.
-- **Hard — Minimax (Minimax Alpha-Beta):** Searches four completed turns ahead, treats protected-pit choices as decisions by the same player, and uses alpha-beta pruning with a separate bound on protected-choice search (up to eight protected choices per search).
+- **Medium — Monte Carlo Tree Search (MCTS):** UCT search with 20 iterations per decision and random rollouts up to 100 steps. Rollouts may cross one settlement boundary into the prepared next round and include Drop/Skip choices.
+- **Hard — Minimax (Minimax Alpha-Beta):** Searches five completed turns ahead, treats protected-pit choices as decisions by the same player, and uses alpha-beta pruning with a separate bound on protected-choice search (up to eight protected choices per search). At a reached round boundary it settles the round and evaluates/searches the prepared next round.
+
+All three agents use a shared strategic projection that considers secured seeds, reserves, mobility, territory, captured original pits and conquest. In a local 30-seed paired Round-1 calibration (60 games with sides swapped), depth-5 Minimax recorded 32 wins, 27 losses and 1 draw against the 20-iteration MCTS configuration, with cumulative seed margin `+142`. This supports the current Medium/Hard product ordering for that configuration; it does not guarantee that Minimax wins every position.
 
 **Screen Type: AI Difficulty Selection**
 
@@ -129,7 +130,7 @@ From the Main Menu, choose **AI vs AI** (`3`) to pick one of the available match
 
 ![AI matchup selection screen](screenshots/Screenshot%20from%202026-11-21%2000-04-29.png)
 
-Once a matchup starts, both agents choose pits and protected-pit actions automatically while you watch the animated moves, protected pit badges (such as `P2 L`), and the live event log. At round end, click **Settle Round**, then **Continue** or **End Game**.
+Once a matchup starts, both agents choose pits and protected-pit actions automatically while you watch the animated moves, protected-pit padlocks and chains, and the live event log. At round end, click **Settle Round**, then **Continue** or **End Game**.
 
 **Screen Type: AI vs AI Gameplay (Later Round with Protected Pit & Drop Action)**
 

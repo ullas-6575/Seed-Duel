@@ -17,7 +17,7 @@ def initial_state(pits_per_player: int = 5, seeds_per_pit: int = 4) -> GameState
         seeds_per_pit=seeds_per_pit,
     )
     key = position_key(state)
-    return state.evolve(round_positions=(key,), settled_positions=(key,))
+    return state.evolve(round_positions=(key,))
 
 
 def position_key(state: GameState) -> tuple[object, ...]:
@@ -31,6 +31,71 @@ def round_earnings(state: GameState) -> tuple[int, int]:
     for i, seeds in enumerate(state.pits):
         funds[state.owner_of(i)] += seeds
     return funds[0], funds[1]
+
+
+def _contiguous_capture_order(
+    state: GameState,
+    owners: list[int],
+    defender: int,
+    unfilled: set[int],
+) -> tuple[int, ...]:
+    """Choose one boundary and keep an invasion contiguous from that side."""
+    attacker = 1 - defender
+    home = tuple(
+        index
+        for index in range(len(owners))
+        if state.original_owner_of(index) == defender
+    )
+    orders = (home, tuple(reversed(home)))
+    invaded = {index for index in home if owners[index] == attacker}
+
+    if invaded:
+        candidates: list[tuple[int, tuple[int, ...]]] = []
+        for order in orders:
+            prefix = 0
+            while prefix < len(order) and owners[order[prefix]] == attacker:
+                prefix += 1
+            if invaded == set(order[:prefix]):
+                candidates.append((prefix, order))
+        if candidates:
+            return max(candidates, key=lambda item: item[0])[1]
+
+    def available_run(order: tuple[int, ...]) -> int:
+        run = 0
+        for index in order:
+            if owners[index] != defender or index not in unfilled:
+                break
+            run += 1
+        return run
+
+    # Prefer the boundary with the longest immediately capturable run. A tie
+    # is deterministic, which keeps settlement reproducible for AI search.
+    return max(orders, key=available_run)
+
+
+def _contiguous_reclaim_order(
+    state: GameState,
+    owners: list[int],
+    original_owner: int,
+) -> tuple[int, ...]:
+    """Peel an existing invasion from its inner edge toward the boundary."""
+    home = tuple(
+        index
+        for index in range(len(owners))
+        if state.original_owner_of(index) == original_owner
+    )
+    invaded = {index for index in home if owners[index] != original_owner}
+    for boundary_order in (home, tuple(reversed(home))):
+        prefix = 0
+        while (
+            prefix < len(boundary_order)
+            and owners[boundary_order[prefix]] != original_owner
+        ):
+            prefix += 1
+        if invaded == set(boundary_order[:prefix]):
+            return tuple(reversed(boundary_order[:prefix]))
+    # Defensive fallback for legacy/non-consecutive saved states.
+    return tuple(sorted(invaded))
 
 
 def legal_actions(state: GameState) -> tuple[int, ...]:
@@ -264,9 +329,8 @@ def settle_round(state: GameState) -> tuple[GameState, tuple[Event, ...]]:
     # Original owners get the first chance to reclaim captured pits, at the usual fill cost.
     reclaimed: set[int] = set()
     for player in (0, 1):
-        for i in range(len(pits)):
-            if (state.original_owner_of(i) == player and owners[i] != player
-                    and funds[player] >= state.seeds_per_pit):
+        for i in _contiguous_reclaim_order(state, owners, player):
+            if funds[player] >= state.seeds_per_pit:
                 owners[i] = player
                 protected[i] = False
                 pits[i] = state.seeds_per_pit
@@ -286,18 +350,30 @@ def settle_round(state: GameState) -> tuple[GameState, tuple[Event, ...]]:
             else:
                 unfilled.append((i, player))
 
-    # To capture an opponent's unfilled pit, the opponent must fill it fully.
-    still_unfilled: list[int] = []
-    for i, current_owner in unfilled:
-        other = 1 - current_owner
-        if funds[other] >= state.seeds_per_pit:
-            owners[i] = other
-            protected[i] = owners[i] != state.original_owner_of(i)
+    # An opponent may capture only from one boundary of the defender's home
+    # territory, continuing consecutively from that same side. Every captured
+    # pit must still be filled completely.
+    unfilled_set = {index for index, _ in unfilled}
+    for defender in (0, 1):
+        attacker = 1 - defender
+        order = _contiguous_capture_order(state, owners, defender, unfilled_set)
+        for i in order:
+            if owners[i] == attacker:
+                continue
+            if owners[i] != defender or i not in unfilled_set:
+                break
+            if funds[attacker] < state.seeds_per_pit:
+                break
+            owners[i] = attacker
+            protected[i] = True
             pits[i] = state.seeds_per_pit
-            funds[other] -= state.seeds_per_pit
-            events.append(Event.create("OwnershipChanged", index=i, owner=other))
-        else:
-            still_unfilled.append(i)
+            funds[attacker] -= state.seeds_per_pit
+            unfilled_set.remove(i)
+            events.append(Event.create("OwnershipChanged", index=i, owner=attacker))
+
+    still_unfilled = [
+        index for index, _ in unfilled if index in unfilled_set
+    ]
 
     # Give any remaining seeds away to the board so play continues fairly.
     remainder = funds[0] + funds[1]
@@ -327,22 +403,18 @@ def settle_round(state: GameState) -> tuple[GameState, tuple[Event, ...]]:
         events.append(Event.create("GameWon", player=winner))
     else:
         key = position_key(settled)
-        if key in state.settled_positions:
-            settled = settled.evolve(phase=Phase.GAME_END, terminal_reason="repeated_settlement", winner=None)
-            events.append(Event.create("DrawDetected"))
-        else:
-            settled = settled.evolve(settled_positions=state.settled_positions + (key,), round_positions=(key,))
-            can_move = [any(
-                owners[i] == p and not protected[i] and pits[i] > 0
-                for i in range(len(pits))
-            ) for p in (0, 1)]
-            if not any(can_move):
-                territories = [owners.count(p) for p in (0, 1)]
-                winner = 0 if territories[0] > territories[1] else 1 if territories[1] > territories[0] else None
-                settled = settled.evolve(phase=Phase.GAME_END,
-                                         terminal_reason="territory" if winner is not None else "territory_draw",
-                                         winner=winner)
-                events.append(Event.create("TerritoryResult", player=winner if winner is not None else "draw"))
+        settled = settled.evolve(round_positions=(key,))
+        can_move = [any(
+            owners[i] == p and not protected[i] and pits[i] > 0
+            for i in range(len(pits))
+        ) for p in (0, 1)]
+        if not any(can_move):
+            territories = [owners.count(p) for p in (0, 1)]
+            winner = 0 if territories[0] > territories[1] else 1 if territories[1] > territories[0] else None
+            settled = settled.evolve(phase=Phase.GAME_END,
+                                     terminal_reason="territory" if winner is not None else "territory_draw",
+                                     winner=winner)
+            events.append(Event.create("TerritoryResult", player=winner if winner is not None else "draw"))
     settled.assert_conserved()
     return settled, tuple(events)
 

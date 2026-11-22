@@ -1,4 +1,4 @@
-"""Monte Carlo tree search advisor for the deterministic Round-1 rules."""
+"""Round-aware Monte Carlo tree search advisor."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from seed_duel.rules import (
     apply_protected_choice,
     apply_select_pit,
     legal_actions,
-    round_earnings,
 )
+from seed_duel.ai.strategy import advance_round_for_search, strategic_value
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +48,7 @@ def recommend_move(
     exploration: float = sqrt(2),
     rollout_limit: int = 100,
     seed: int | None = None,
+    round_lookahead: int = 1,
 ) -> MCTSRecommendation | None:
     """Choose a legal pit using UCT and random complete-turn rollouts.
 
@@ -56,7 +57,9 @@ def recommend_move(
     """
     if state.phase is not Phase.SELECT or not legal_actions(state):
         return None
-    best = _recommend_action(state, iterations, exploration, rollout_limit, seed)
+    best = _recommend_action(
+        state, iterations, exploration, rollout_limit, round_lookahead, seed
+    )
     if best is None:
         return None
     action, node = best
@@ -75,11 +78,14 @@ def recommend_protected_choice(
     exploration: float = sqrt(2),
     rollout_limit: int = 100,
     seed: int | None = None,
+    round_lookahead: int = 1,
 ) -> MCTSProtectedChoiceRecommendation | None:
     """Use MCTS to choose Drop or Skip at the current protected pit."""
     if state.phase is not Phase.DROP_SKIP:
         return None
-    best = _recommend_action(state, iterations, exploration, rollout_limit, seed)
+    best = _recommend_action(
+        state, iterations, exploration, rollout_limit, round_lookahead, seed
+    )
     if best is None:
         return None
     action, node = best
@@ -97,6 +103,7 @@ def _recommend_action(
     iterations: int,
     exploration: float,
     rollout_limit: int,
+    round_lookahead: int,
     seed: int | None,
 ) -> tuple[int | bool, _Node] | None:
     actions = _available_actions(state)
@@ -106,6 +113,8 @@ def _recommend_action(
         raise ValueError("iterations and rollout_limit must be at least 1")
     if exploration < 0:
         raise ValueError("exploration must be non-negative")
+    if round_lookahead < 0:
+        raise ValueError("round_lookahead cannot be negative")
 
     rng = random.Random(seed)
     root_player = state.player
@@ -125,7 +134,9 @@ def _recommend_action(
             node.untried = list(_available_actions(child_state))
             node.parent.children.append(node)
 
-        reward = _rollout(node.state, root_player, rollout_limit, rng)
+        reward = _rollout(
+            node.state, root_player, rollout_limit, round_lookahead, rng
+        )
         while node is not None:
             node.visits += 1
             node.value += reward
@@ -164,12 +175,24 @@ def _select_child(node: _Node, root_player: int, exploration: float) -> _Node:
     return max(node.children, key=score)
 
 
-def _rollout(state: GameState, root_player: int, limit: int, rng: random.Random) -> float:
+def _rollout(
+    state: GameState,
+    root_player: int,
+    limit: int,
+    round_lookahead: int,
+    rng: random.Random,
+) -> float:
     position = state
-    # shortcut: score at the rollout limit; raise it if typical rounds exceed this depth.
+    rounds_crossed = 0
     for _ in range(limit):
-        if position.phase in (Phase.ROUND_END, Phase.GAME_END):
+        if position.phase is Phase.GAME_END:
             return _score_fraction(position, root_player)
+        if position.phase is Phase.ROUND_END:
+            if rounds_crossed >= round_lookahead:
+                return _score_fraction(position, root_player)
+            position = advance_round_for_search(position)
+            rounds_crossed += 1
+            continue
         actions = _available_actions(position)
         if not actions:
             return _score_fraction(position, root_player)
@@ -178,16 +201,9 @@ def _rollout(state: GameState, root_player: int, limit: int, rng: random.Random)
 
 
 def _score_fraction(state: GameState, root_player: int) -> float:
-    if state.phase is Phase.GAME_END:
-        return 0.5 if state.winner is None else float(state.winner == root_player)
-    if state.phase is Phase.ROUND_END:
-        scores = round_earnings(state)
-    else:
-        scores = [state.captured[p] + state.reserves[p] for p in (0, 1)]
-        for index, seeds in enumerate(state.pits):
-            scores[state.owner_of(index)] += seeds
-        scores[state.player] += state.hand
-    if state.initial_total == 0:
-        return 0.5
-    difference = scores[root_player] - scores[1 - root_player]
-    return max(0.0, min(1.0, 0.5 + difference / (2 * state.initial_total)))
+    value = strategic_value(state, root_player, project_settlement=True)
+    if value >= 10**8:
+        return 1.0
+    if value <= -(10**8):
+        return 0.0
+    return max(0.0, min(1.0, 0.5 + value / 40_000))

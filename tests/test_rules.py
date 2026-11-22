@@ -80,6 +80,78 @@ class RulesTests(unittest.TestCase):
         self.assertTrue(settled.protected[4])
         settled.assert_conserved()
 
+    def test_captured_pits_expand_consecutively_from_one_boundary(self) -> None:
+        state = GameState(
+            pits=(0,) * 10,
+            captured=(8, 32),
+            initial_total=40,
+            phase=Phase.ROUND_END,
+            terminal_reason="test_boundary",
+        )
+
+        settled, _ = settle_round(state)
+
+        self.assertEqual(settled.owners, (0, 0, 1, 1, 1, 1, 1, 1, 1, 1))
+        self.assertEqual(
+            settled.protected,
+            (False, False, True, True, True, False, False, False, False, False),
+        )
+        settled.assert_conserved()
+
+    def test_captured_pits_do_not_jump_over_a_filled_boundary_pit(self) -> None:
+        state = GameState(
+            pits=(0,) * 10,
+            captured=(32, 8),
+            initial_total=40,
+            phase=Phase.ROUND_END,
+            terminal_reason="test_boundary",
+        )
+
+        settled, _ = settle_round(state)
+
+        self.assertEqual(settled.owners, (0, 0, 0, 0, 0, 1, 1, 0, 0, 0))
+        self.assertEqual(
+            settled.protected,
+            (False, False, False, False, False, False, False, True, True, True),
+        )
+        settled.assert_conserved()
+
+    def test_reclaim_peels_chain_from_inner_edge(self) -> None:
+        state = GameState(
+            pits=(0,) * 10,
+            captured=(4, 36),
+            owners=(1, 1, 1, 0, 0, 1, 1, 1, 1, 1),
+            protected=(True, True, True, False, False, False, False, False, False, False),
+            initial_total=40,
+            phase=Phase.ROUND_END,
+            terminal_reason="test_boundary",
+        )
+
+        settled, _ = settle_round(state)
+
+        self.assertEqual(settled.owners[:5], (1, 1, 0, 0, 0))
+        self.assertEqual(settled.protected[:5], (True, True, False, False, False))
+        settled.assert_conserved()
+
+    def test_repeating_a_settled_position_does_not_force_a_draw(self) -> None:
+        boundary = initial_state().evolve(
+            phase=Phase.ROUND_END,
+            terminal_reason="test_boundary",
+        )
+        first, _ = settle_round(boundary)
+        repeated_boundary = first.evolve(
+            phase=Phase.ROUND_END,
+            terminal_reason="test_boundary",
+        )
+
+        repeated, events = settle_round(repeated_boundary)
+
+        self.assertIs(repeated.phase, Phase.ROUND_END)
+        self.assertEqual(repeated.terminal_reason, "settled")
+        self.assertIsNone(repeated.winner)
+        self.assertFalse(any(event.kind == "DrawDetected" for event in events))
+        repeated.assert_conserved()
+
     def test_illegal_selection_does_not_change_state(self) -> None:
         state = initial_state()
         result, events = apply_select_pit(state, 7)

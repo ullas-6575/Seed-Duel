@@ -5,7 +5,12 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 import pygame
 
-from seed_duel.ui.app import AI_MATCHUPS, SeedDuelApp
+from seed_duel.ui.app import (
+    AI_MATCHUPS,
+    MCTS_UI_ITERATIONS,
+    MINIMAX_UI_DEPTH,
+    SeedDuelApp,
+)
 
 
 class AiVsAiUiTests(unittest.TestCase):
@@ -26,6 +31,10 @@ class AiVsAiUiTests(unittest.TestCase):
             app.ai_level = None
             self.assertEqual(app._algorithm_for_player(0), matchup[0])
             self.assertEqual(app._algorithm_for_player(1), matchup[1])
+
+    def test_medium_and_hard_use_the_documented_strength_calibration(self) -> None:
+        self.assertEqual(MCTS_UI_ITERATIONS, 20)
+        self.assertEqual(MINIMAX_UI_DEPTH, 5)
 
     def test_ai_vs_ai_starts_p1_and_automatically_hands_off_to_p2(self) -> None:
         app = SeedDuelApp()
