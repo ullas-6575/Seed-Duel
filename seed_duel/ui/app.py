@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from array import array
 from dataclasses import dataclass
-from math import hypot, sin
+from math import exp, hypot, pi, sin
 
 import pygame
 
@@ -66,6 +67,7 @@ AI_MATCHUPS = (
 MCTS_UI_ITERATIONS = 20
 MINIMAX_UI_DEPTH = 5
 MAX_HINTS_PER_ROUND = 3
+PROMPT_NOTICE_MS = 1400
 BOARD_RECT = pygame.Rect(40, 120, 790, 430)
 PLAYER_LABEL_POSITIONS = {
     0: (69, 365),
@@ -94,6 +96,31 @@ class AnimationStep:
     duration_ms: int
     source_index: int | None = None
     target_index: int | None = None
+
+
+def _synthesize_chime(
+    notes: tuple[tuple[float, int], ...],
+    sample_rate: int,
+    channels: int,
+    volume: float = 0.35,
+) -> bytes:
+    """Synthesize a soft 16-bit signed PCM chime from (frequency_hz, duration_ms) notes."""
+    samples = array("h")
+    amplitude = int(32767 * volume)
+    for frequency, duration_ms in notes:
+        total = max(1, int(sample_rate * duration_ms / 1000))
+        attack = max(1, int(sample_rate * 0.008))
+        for i in range(total):
+            t = i / sample_rate
+            env = min(1.0, i / attack) * exp(-4.5 * i / total)
+            wave = (
+                0.82 * sin(2.0 * pi * frequency * t)
+                + 0.18 * sin(4.0 * pi * frequency * t)
+            )
+            sample = max(-32767, min(32767, int(amplitude * env * wave)))
+            for _ in range(channels):
+                samples.append(sample)
+    return samples.tobytes()
 
 
 class SeedDuelApp:
@@ -128,6 +155,10 @@ class SeedDuelApp:
         self.loop_avoid_state: GameState | None = None
         self.loop_previous_choice: bool | None = None
         self.loop_dialog_message = ""
+        self.sound_enabled = True
+        self._sounds: dict[str, pygame.mixer.Sound] = self._init_notification_sounds()
+        self.prompt_notice_kind: str | None = None
+        self.prompt_notice_until = 0
         self.game_over = False
         self.running = True
         self.pits = self._make_pit_views()
@@ -138,6 +169,7 @@ class SeedDuelApp:
         self.medium_rect = pygame.Rect(300, 345, 500, 65)
         self.hard_rect = pygame.Rect(300, 430, 500, 65)
         self.back_rect = pygame.Rect(300, 515, 500, 50)
+        self.sound_rect = pygame.Rect(472, 29, 42, 42)
         self.hint_rect = pygame.Rect(522, 29, 120, 42)
         self.back_game_rect = pygame.Rect(650, 29, 85, 42)
         self.resign_rect = pygame.Rect(743, 29, 145, 42)
@@ -150,6 +182,50 @@ class SeedDuelApp:
         self.decline_draw_rect = pygame.Rect(963, 620, 102, 42)
         self.loop_avoid_rect = pygame.Rect(330, 405, 205, 48)
         self.loop_settle_rect = pygame.Rect(565, 405, 205, 48)
+
+    @staticmethod
+    def _init_notification_sounds() -> dict[str, pygame.mixer.Sound]:
+        """Create subtle built-in chimes without requiring external audio files."""
+        try:
+            mixer_info = pygame.mixer.get_init()
+            if mixer_info is None:
+                pygame.mixer.init(frequency=22050, size=-16, channels=1, buffer=512)
+                mixer_info = pygame.mixer.get_init()
+            if mixer_info is None or mixer_info[1] != -16:
+                return {}
+            sample_rate, _, channels = mixer_info
+            play_sound = pygame.mixer.Sound(
+                buffer=_synthesize_chime(((659.25, 90), (880.0, 150)), sample_rate, channels)
+            )
+            drop_skip_sound = pygame.mixer.Sound(
+                buffer=_synthesize_chime(
+                    ((783.99, 80), (1046.50, 80), (783.99, 140)),
+                    sample_rate,
+                    channels,
+                )
+            )
+            play_sound.set_volume(0.5)
+            drop_skip_sound.set_volume(0.6)
+            return {"play": play_sound, "drop_skip": drop_skip_sound}
+        except pygame.error:
+            return {}
+
+    def _notify_human_prompt(self, kind: str) -> None:
+        """Notify a human player with sound and a brief visual highlight."""
+        self.prompt_notice_kind = kind
+        self.prompt_notice_until = pygame.time.get_ticks() + PROMPT_NOTICE_MS
+        if not self.sound_enabled:
+            return
+        sound = self._sounds.get(kind)
+        if sound is not None:
+            try:
+                sound.play()
+            except pygame.error:
+                pass
+
+    def _clear_human_prompt_notice(self) -> None:
+        self.prompt_notice_kind = None
+        self.prompt_notice_until = 0
 
     @staticmethod
     def _make_pit_views() -> tuple[PitView, ...]:
@@ -178,6 +254,8 @@ class SeedDuelApp:
                 self.running = False
             elif event.type == pygame.KEYDOWN and not self.game_started:
                 self._handle_menu_key(event.key)
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_m:
+                self.sound_enabled = not self.sound_enabled
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 self._handle_click(event.pos)
 
@@ -257,8 +335,11 @@ class SeedDuelApp:
         self.loop_previous_choice = None
         self.loop_dialog_message = ""
         self.game_over = False
+        self._clear_human_prompt_notice()
         if self._algorithm_for_player(self.state.player) is not None:
             self._play_ai_turn()
+        elif self.state.phase is Phase.SELECT:
+            self._notify_human_prompt("play")
 
     def _return_to_menu(self, page: str, clear_history: bool = False) -> None:
         self.game_started = False
@@ -278,6 +359,7 @@ class SeedDuelApp:
         self.loop_avoid_state = None
         self.loop_previous_choice = None
         self.loop_dialog_message = ""
+        self._clear_human_prompt_notice()
 
     def _algorithm_for_player(self, player: int) -> str | None:
         if self.ai_matchup is not None:
@@ -300,6 +382,9 @@ class SeedDuelApp:
             return
         if self.restart_rect.collidepoint(pos):
             self._start_game(self.ai_level, self.ai_matchup)
+            return
+        if self.sound_rect.collidepoint(pos):
+            self.sound_enabled = not self.sound_enabled
             return
         if self.back_game_rect.collidepoint(pos):
             self._return_to_menu(self.previous_menu_page)
@@ -375,6 +460,7 @@ class SeedDuelApp:
             else:
                 return
             self.state, events = apply_protected_choice(self.state, drop=drop)
+            self._clear_human_prompt_notice()
             if before.round_number > 1:
                 self.loop_avoid_state = before
                 self.loop_previous_choice = drop
@@ -402,15 +488,17 @@ class SeedDuelApp:
                 if new_events and new_events[0].kind == "IllegalAction":
                     self.message = "Choose one of your highlighted non-empty pits."
                     self.display_state = self.state
-                elif self.state.phase is Phase.DROP_SKIP:
-                    self._queue_turn_animation(before, self.state, new_events)
-                    self.animation_message = "Protected pit encountered: choose Drop or Skip."
-                elif self.state.phase is Phase.ROUND_END:
-                    self._queue_turn_animation(before, self.state, new_events)
-                    self.animation_message = "Round ended. Click Settle Round to calculate final totals."
                 else:
-                    self._queue_turn_animation(before, self.state, new_events)
-                    self.animation_message = f"Player {self.state.player + 1}: choose a highlighted pit."
+                    self._clear_human_prompt_notice()
+                    if self.state.phase is Phase.DROP_SKIP:
+                        self._queue_turn_animation(before, self.state, new_events)
+                        self.animation_message = "Protected pit encountered: choose Drop or Skip."
+                    elif self.state.phase is Phase.ROUND_END:
+                        self._queue_turn_animation(before, self.state, new_events)
+                        self.animation_message = "Round ended. Click Settle Round to calculate final totals."
+                    else:
+                        self._queue_turn_animation(before, self.state, new_events)
+                        self.animation_message = f"Player {self.state.player + 1}: choose a highlighted pit."
                 return
 
     def _apply_round_choice(self, choice: str) -> None:
@@ -435,6 +523,8 @@ class SeedDuelApp:
             and self._algorithm_for_player(self.state.player) is not None
         ):
             self._play_ai_turn()
+        elif self.state.phase is Phase.SELECT:
+            self._notify_human_prompt("play")
 
     def _settle_current_round(self) -> None:
         self.state, new_events = settle_round(self.state)
@@ -448,6 +538,7 @@ class SeedDuelApp:
         self.loop_avoid_state = None
         self.loop_previous_choice = None
         self.loop_dialog_message = ""
+        self._clear_human_prompt_notice()
         if self.state.phase is Phase.GAME_END:
             self.game_over = True
             self.message = (
@@ -599,6 +690,15 @@ class SeedDuelApp:
                 else:
                     self.advice = None
                     self.message = self.animation_message
+                    if (
+                        not self.game_over
+                        and not self.loop_choice_offer
+                        and self._algorithm_for_player(self.state.player) is None
+                    ):
+                        if self.state.phase is Phase.DROP_SKIP:
+                            self._notify_human_prompt("drop_skip")
+                        elif self.state.phase is Phase.SELECT:
+                            self._notify_human_prompt("play")
 
     def _play_ai_turn(self) -> None:
         algorithm = self._algorithm_for_player(self.state.player)
@@ -623,6 +723,7 @@ class SeedDuelApp:
             if drop is None:
                 return
             self.state, events = apply_protected_choice(self.state, drop=drop)
+            self._clear_human_prompt_notice()
             decision_text = "Drop" if drop else "Skip"
         else:
             if algorithm == "greedy":
@@ -721,6 +822,7 @@ class SeedDuelApp:
             ),
             (44, 69),
         )
+        self._draw_sound_button()
         if self._can_request_hint():
             self._draw_hint_button()
         pygame.draw.rect(self.screen, BROWN, self.back_game_rect, border_radius=10)
@@ -762,6 +864,31 @@ class SeedDuelApp:
             f"AI suggests Pit {recommendation.pit_index + 1} "
             f"({remaining} suggestion{'s' if remaining != 1 else ''} left this round)."
         )
+
+    def _draw_sound_button(self) -> None:
+        bg = BROWN if self.sound_enabled else MUTED
+        pygame.draw.rect(self.screen, bg, self.sound_rect, border_radius=10)
+        cx, cy = self.sound_rect.center
+        # Draw a compact speaker icon.
+        speaker = [
+            (cx - 10, cy - 4),
+            (cx - 5, cy - 4),
+            (cx + 1, cy - 9),
+            (cx + 1, cy + 9),
+            (cx - 5, cy + 4),
+            (cx - 10, cy + 4),
+        ]
+        pygame.draw.polygon(self.screen, PANEL, speaker)
+        if self.sound_enabled:
+            pygame.draw.arc(
+                self.screen, PANEL, pygame.Rect(cx + 1, cy - 6, 8, 12), -1.0, 1.0, 2
+            )
+            pygame.draw.arc(
+                self.screen, PANEL, pygame.Rect(cx + 3, cy - 9, 11, 18), -1.0, 1.0, 2
+            )
+        else:
+            pygame.draw.line(self.screen, (245, 164, 150), (cx + 4, cy - 5), (cx + 12, cy + 5), 2)
+            pygame.draw.line(self.screen, (245, 164, 150), (cx + 12, cy - 5), (cx + 4, cy + 5), 2)
 
     def _draw_hint_button(self) -> None:
         remaining = self.hints_remaining[self.state.player]
@@ -953,6 +1080,19 @@ class SeedDuelApp:
     def _draw_footer(self) -> None:
         message_rect = pygame.Rect(40, 585, 790, 95)
         pygame.draw.rect(self.screen, PANEL, message_rect, border_radius=18)
+        now = pygame.time.get_ticks()
+        human_drop_skip = (
+            self.state.phase is Phase.DROP_SKIP
+            and not self.game_over
+            and not self.current_step
+            and not self.animation_steps
+            and self._algorithm_for_player(self.state.player) is None
+        )
+        if human_drop_skip:
+            border_width = 3 if int(now / 260) % 2 == 0 else 2
+            pygame.draw.rect(self.screen, GOLD_LIGHT, message_rect, border_width, border_radius=18)
+        elif self.prompt_notice_kind == "play" and now < self.prompt_notice_until:
+            pygame.draw.rect(self.screen, GREEN, message_rect, 3, border_radius=18)
         self._wrapped_text(self.message, message_rect.inflate(-30, -22), self.font, TEXT)
         if self.state.phase is Phase.ROUND_END and self.state.terminal_reason != "settled":
             pygame.draw.rect(self.screen, BROWN, self.settle_rect, border_radius=10)
@@ -971,12 +1111,17 @@ class SeedDuelApp:
         ):
             if self.draw_offer:
                 buttons = ((self.accept_draw_rect, "Agree"), (self.decline_draw_rect, "Decline"))
+                button_bg = BROWN
             elif self.state.phase is Phase.DROP_SKIP:
                 buttons = ((self.accept_draw_rect, "Drop"), (self.decline_draw_rect, "Skip"))
+                button_bg = GOLD
             else:
                 buttons = ((self.draw_rect, "Propose Draw"),)
+                button_bg = BROWN
             for rect, label in buttons:
-                pygame.draw.rect(self.screen, BROWN, rect, border_radius=10)
+                pygame.draw.rect(self.screen, button_bg, rect, border_radius=10)
+                if human_drop_skip:
+                    pygame.draw.rect(self.screen, GOLD_LIGHT, rect, 2, border_radius=10)
                 self._center_text(label, rect, self.small_font, PANEL)
 
     def _draw_later_loop_dialog(self) -> None:
