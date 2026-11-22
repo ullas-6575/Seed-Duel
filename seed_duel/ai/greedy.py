@@ -1,4 +1,4 @@
-"""One-turn greedy opponent for the Round-1 rules."""
+"""One-turn greedy opponent with a next-round settlement projection."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from seed_duel.rules import (
     apply_protected_choice,
     apply_select_pit,
     legal_actions,
-    round_earnings,
 )
+from seed_duel.ai.strategy import strategic_value
 
 
 def choose_move(state: GameState) -> int | None:
@@ -63,19 +63,4 @@ def _best_protected_route_value(
 
 
 def _evaluate(state: GameState, player: int) -> int:
-    if state.phase is Phase.ROUND_END:
-        scores = round_earnings(state)
-        return (scores[player] - scores[1 - player]) * 1000
-
-    own_board = sum(seeds for index, seeds in enumerate(state.pits) if state.owner_of(index) == player)
-    other_board = sum(seeds for index, seeds in enumerate(state.pits) if state.owner_of(index) != player)
-    own_secured = state.captured[player] + state.reserves[player]
-    other_secured = state.captured[1 - player] + state.reserves[1 - player]
-    if state.player == player:
-        own_secured += state.hand
-    else:
-        other_secured += state.hand
-    captured_balance = own_secured - other_secured
-    board_balance = own_board - other_board
-    mobility = len(legal_actions(state)) * (1 if state.player == player else -1)
-    return captured_balance * 20 + board_balance * 2 + mobility
+    return strategic_value(state, player, project_settlement=True)

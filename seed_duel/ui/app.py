@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import sin
+from math import hypot, sin
 
 import pygame
 
@@ -62,11 +62,18 @@ AI_MATCHUPS = (
     ("greedy", "mcts"),
     ("greedy", "minimax"),
 )
+# Product calibration: Medium stays deliberately below the deeper Hard search.
+MCTS_UI_ITERATIONS = 20
+MINIMAX_UI_DEPTH = 5
 MAX_HINTS_PER_ROUND = 3
 BOARD_RECT = pygame.Rect(40, 120, 790, 430)
 PLAYER_LABEL_POSITIONS = {
     0: (69, 365),
     1: (69, 140),
+}
+ACCOUNT_PIT_CENTERS = {
+    0: (910, 274),
+    1: (1010, 274),
 }
 
 
@@ -563,7 +570,8 @@ class SeedDuelApp:
                 pits[index] = 0
                 captured[player] += amount
                 after = working.evolve(pits=tuple(pits), captured=tuple(captured))
-                steps.append(AnimationStep(working, after, event, 360, source_index=index))
+                duration = min(1050, 480 + amount * 65)
+                steps.append(AnimationStep(working, after, event, duration, source_index=index))
                 working = after
 
         self.display_state = before
@@ -603,10 +611,14 @@ class SeedDuelApp:
             if algorithm == "greedy":
                 drop = choose_greedy_protected_choice(self.state)
             elif algorithm == "mcts":
-                choice = recommend_mcts_protected_choice(self.state, iterations=250)
+                choice = recommend_mcts_protected_choice(
+                    self.state, iterations=MCTS_UI_ITERATIONS
+                )
                 drop = choice.drop if choice else None
             else:
-                choice = recommend_protected_choice(self.state, depth=4)
+                choice = recommend_protected_choice(
+                    self.state, depth=MINIMAX_UI_DEPTH
+                )
                 drop = choice.drop if choice else None
             if drop is None:
                 return
@@ -616,10 +628,12 @@ class SeedDuelApp:
             if algorithm == "greedy":
                 pit_index = choose_greedy_move(self.state)
             elif algorithm == "mcts":
-                result = recommend_mcts_move(self.state, iterations=250)
+                result = recommend_mcts_move(
+                    self.state, iterations=MCTS_UI_ITERATIONS
+                )
                 pit_index = result.pit_index if result else None
             else:
-                result = recommend_move(self.state, depth=4)
+                result = recommend_move(self.state, depth=MINIMAX_UI_DEPTH)
                 pit_index = result.pit_index if result else None
             if pit_index is None:
                 return
@@ -655,7 +669,8 @@ class SeedDuelApp:
             return
         self._draw_header()
         self._draw_board()
-        self._draw_event_panel()
+        self._draw_status_panel()
+        self._draw_flying_seed()
         self._draw_footer()
         self._draw_later_loop_dialog()
 
@@ -780,19 +795,116 @@ class SeedDuelApp:
         self._text(self._player_name(1).upper(), PLAYER_LABEL_POSITIONS[1], self.font, RED)
         self._text(self._player_name(0).upper(), PLAYER_LABEL_POSITIONS[0], self.font, GREEN)
         legal = set(legal_actions(self.display_state)) if not self.current_step and not self.animation_steps else set()
+        self._draw_protected_chains()
         for pit in self.pits:
             is_legal = pit.index in legal
             is_recommended = self.advice is not None and pit.index == self.advice.pit_index and not self.current_step
-            self._draw_pit(pit, self.display_state.pits[pit.index], is_legal, is_recommended)
+            draw_pit, count = self._capture_pit_frame(
+                pit, self.display_state.pits[pit.index]
+            )
+            self._draw_pit(draw_pit, count, is_legal, is_recommended)
             self._center_text(str(pit.index + 1), pygame.Rect(pit.rect.x, pit.rect.y + 8, pit.rect.width, 20), self.small_font, PANEL)
             owner = self.display_state.owner_of(pit.index)
             marker = pygame.Rect(pit.center[0] - 22, pit.rect.y - 13, 44, 20)
             pygame.draw.rect(self.screen, GREEN if owner == 0 else RED, marker, border_radius=8)
-            label = f"P{owner + 1}{' L' if self.display_state.is_protected(pit.index) else ''}"
-            self._center_text(label, marker, self.small_font, PANEL)
-        self._draw_flying_seed()
+            if self.display_state.is_protected(pit.index):
+                self._center_text(
+                    f"P{owner + 1}",
+                    pygame.Rect(marker.x, marker.y, 27, marker.height),
+                    self.small_font,
+                    PANEL,
+                )
+                self._draw_lock_icon((marker.right - 9, marker.centery + 1))
+            else:
+                self._center_text(f"P{owner + 1}", marker, self.small_font, PANEL)
+    def _capture_progress(self) -> float:
+        if not self.current_step or self.current_step.duration_ms <= 0:
+            return 0.0
+        elapsed = pygame.time.get_ticks() - self.step_started_at
+        return min(1.0, max(0.0, elapsed / self.current_step.duration_ms))
 
-    def _draw_event_panel(self) -> None:
+    def _capture_pit_frame(self, pit: PitView, count: int) -> tuple[PitView, int]:
+        """Return the shaking capture pit and its visually remaining seeds."""
+        step = self.current_step
+        if (
+            not step
+            or step.event.kind != "SeedsCaptured"
+            or step.source_index != pit.index
+        ):
+            return pit, count
+        progress = self._capture_progress()
+        shake_phase = min(1.0, progress / 0.38)
+        shake = int(sin(shake_phase * 10 * 3.14159) * 7 * (1.0 - shake_phase))
+        amount = int(dict(step.event.data).get("amount", 0))
+        departed = min(amount, int(amount * min(1.0, progress / 0.9)))
+        center = (pit.center[0] + shake, pit.center[1])
+        return (
+            PitView(pit.index, center, pit.rect.move(shake, 0)),
+            max(0, count - departed),
+        )
+
+    def _draw_lock_icon(self, center: tuple[int, int]) -> None:
+        """Draw a compact padlock inside a protected pit's owner badge."""
+        cx, cy = center
+        pygame.draw.arc(
+            self.screen,
+            (255, 236, 174),
+            pygame.Rect(cx - 4, cy - 8, 8, 9),
+            3.14159,
+            6.28318,
+            2,
+        )
+        pygame.draw.rect(
+            self.screen,
+            (255, 220, 116),
+            pygame.Rect(cx - 5, cy - 3, 10, 9),
+            border_radius=2,
+        )
+        pygame.draw.circle(self.screen, BROWN, (cx, cy + 1), 1)
+
+    def _draw_protected_chains(self) -> None:
+        """Link adjacent protected pits with visible metal chain links."""
+        count = len(self.display_state.pits)
+        for index in range(count):
+            following = (index + 1) % count
+            if not (
+                self.display_state.is_protected(index)
+                and self.display_state.is_protected(following)
+                and self.display_state.owner_of(index)
+                == self.display_state.owner_of(following)
+            ):
+                continue
+            start = self._pit_by_index(index).center
+            end = self._pit_by_index(following).center
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            distance = hypot(dx, dy)
+            if distance <= 96:
+                continue
+            ux, uy = dx / distance, dy / distance
+            visible_length = distance - 96
+            links = max(2, int(visible_length / 13))
+            chain_start = (
+                int(start[0] + ux * 48),
+                int(start[1] + uy * 48),
+            )
+            chain_end = (
+                int(end[0] - ux * 48),
+                int(end[1] - uy * 48),
+            )
+            pygame.draw.line(
+                self.screen, (76, 77, 78), chain_start, chain_end, 4
+            )
+            for link in range(links + 1):
+                travel = 48 + visible_length * link / links
+                point = (
+                    int(start[0] + ux * travel),
+                    int(start[1] + uy * travel),
+                )
+                color = (104, 105, 106) if link % 2 else (164, 166, 168)
+                pygame.draw.circle(self.screen, (58, 59, 60), point, 6, 3)
+                pygame.draw.circle(self.screen, color, point, 5, 2)
+
+    def _draw_status_panel(self) -> None:
         panel = pygame.Rect(855, 120, 210, 475)
         pygame.draw.rect(self.screen, PANEL, panel, border_radius=20)
         self._text("GAME STATUS", (875, 145), self.font, BROWN)
@@ -803,21 +915,40 @@ class SeedDuelApp:
             f"{self._player_name(self.display_state.player)}'s turn"
         )
         self._text(player_text, (875, 182), self.small_font, TEXT)
-        self._text(f"P1 captured: {self.display_state.captured[0]}", (875, 222), self.small_font, GREEN)
-        self._text(f"P2 captured: {self.display_state.captured[1]}", (875, 248), self.small_font, RED)
-        self._text(f"Seeds total: {self.display_state.seed_total()} / {self.display_state.initial_total}", (875, 285), self.small_font, TEXT)
-        self._text(f"Reserves: {self.display_state.reserves[0]} / {self.display_state.reserves[1]}", (875, 307), self.small_font, TEXT)
+        for player in (0, 1):
+            self._draw_account_pit(player, self.display_state.captured[player])
+        pygame.draw.line(self.screen, GOLD, (875, 316), (1044, 316), 2)
+        self._text(f"Seeds total: {self.display_state.seed_total()} / {self.display_state.initial_total}", (875, 337), self.small_font, TEXT)
+        self._text(f"Reserves: {self.display_state.reserves[0]} / {self.display_state.reserves[1]}", (875, 363), self.small_font, TEXT)
         territory = tuple(sum(self.display_state.owner_of(i) == player for i in range(len(self.display_state.pits)))
                           for player in (0, 1))
-        self._text(f"Pits owned: {territory[0]} / {territory[1]}", (875, 329), self.small_font, TEXT)
+        self._text(f"Pits owned: {territory[0]} / {territory[1]}", (875, 389), self.small_font, TEXT)
         if self.advice and not self.current_step:
-            self._text(f"AI suggests: Pit {self.advice.pit_index + 1}", (875, 351), self.small_font, ADVISOR)
-            self._text(f"Minimax score: {self.advice.score}", (875, 373), self.small_font, MUTED)
-        pygame.draw.line(self.screen, GOLD, (875, 394), (1044, 394), 2)
-        self._text("Latest events", (875, 411), self.small_font, BROWN)
-        recent = self.events[-8:] or [Event.create("WaitingForMove")]
-        for row, event in enumerate(recent):
-            self._text(self._event_text(event.kind, dict(event.data)), (875, 434 + row * 19), self.small_font, MUTED)
+            self._text(f"AI suggests: Pit {self.advice.pit_index + 1}", (875, 427), self.small_font, ADVISOR)
+            self._text(f"Minimax score: {self.advice.score}", (875, 451), self.small_font, MUTED)
+
+    def _draw_account_pit(self, player: int, count: int) -> None:
+        """Draw one player's captured-seed account as a compact receiving pit."""
+        center = ACCOUNT_PIT_CENTERS[player]
+        color = GREEN if player == 0 else RED
+        label_rect = pygame.Rect(center[0] - 47, 215, 94, 22)
+        self._center_text(f"P{player + 1} ACCOUNT", label_rect, self.small_font, color)
+
+        outer = pygame.Rect(center[0] - 39, center[1] - 28, 78, 56)
+        pygame.draw.ellipse(self.screen, (34, 21, 14), outer.move(0, 5))
+        pygame.draw.ellipse(self.screen, color, outer)
+        rim = outer.inflate(-6, -6)
+        pygame.draw.ellipse(self.screen, GOLD_LIGHT, rim)
+        well = rim.inflate(-9, -11)
+        pygame.draw.ellipse(self.screen, (37, 22, 14), well)
+        floor = well.inflate(-7, -8)
+        floor.y += 3
+        pygame.draw.ellipse(self.screen, (52, 30, 17), floor)
+        self._draw_pit_seeds(floor, count)
+
+        badge = pygame.Rect(center[0] - 16, center[1] + 10, 32, 19)
+        pygame.draw.rect(self.screen, (33, 20, 13), badge, border_radius=9)
+        self._center_text(str(count), badge, self.small_font, (255, 239, 207))
 
     def _draw_footer(self) -> None:
         message_rect = pygame.Rect(40, 585, 790, 95)
@@ -922,14 +1053,42 @@ class SeedDuelApp:
 
     def _draw_flying_seed(self) -> None:
         step = self.current_step
-        if not step or step.event.kind != "SeedDropped" or step.source_index is None or step.target_index is None:
+        if not step or step.source_index is None:
             return
-        elapsed = pygame.time.get_ticks() - self.step_started_at
-        progress = min(1.0, elapsed / step.duration_ms)
+        progress = self._capture_progress()
         source = self._pit_by_index(step.source_index).center
-        target = self._pit_by_index(step.target_index).center
+        if step.event.kind == "SeedDropped" and step.target_index is not None:
+            target = self._pit_by_index(step.target_index).center
+            self._draw_seed_flight(source, target, progress, 42)
+            return
+        if step.event.kind != "SeedsCaptured":
+            return
+        data = dict(step.event.data)
+        amount = int(data.get("amount", 0))
+        player = int(data.get("player", 0))
+        shown = min(amount, 10)
+        for seed in range(shown):
+            delay = seed * 0.045
+            local_progress = (progress - delay) / max(0.01, 1.0 - delay)
+            if 0.0 <= local_progress <= 1.0:
+                offset = ((seed % 3 - 1) * 7, (seed % 2) * 5 - 2)
+                seed_source = (source[0] + offset[0], source[1] + offset[1])
+                self._draw_seed_flight(
+                    seed_source,
+                    ACCOUNT_PIT_CENTERS[player],
+                    local_progress,
+                    80 + (seed % 3) * 10,
+                )
+
+    def _draw_seed_flight(
+        self,
+        source: tuple[int, int],
+        target: tuple[int, int],
+        progress: float,
+        arc_height: int,
+    ) -> None:
         x = int(source[0] + (target[0] - source[0]) * progress)
-        y = int(source[1] + (target[1] - source[1]) * progress - 42 * sin(progress * 3.14159))
+        y = int(source[1] + (target[1] - source[1]) * progress - arc_height * sin(progress * 3.14159))
         pygame.draw.ellipse(self.screen, (31, 18, 11), pygame.Rect(x - 8, y - 2, 18, 13))
         pygame.draw.ellipse(self.screen, SEED_DARK, pygame.Rect(x - 9, y - 7, 18, 13))
         pygame.draw.ellipse(self.screen, SEED_BASE, pygame.Rect(x - 8, y - 8, 17, 12))
@@ -937,37 +1096,6 @@ class SeedDuelApp:
 
     def _pit_by_index(self, index: int) -> PitView:
         return next(pit for pit in self.pits if pit.index == index)
-
-    def _event_text(self, kind: str, data: dict[str, int | str]) -> str:
-        if kind == "SeedDropped":
-            return f"Drop → pit {int(data['index']) + 1}"
-        if kind == "SeedsPickedUp":
-            return f"Pick up {data['amount']} from {int(data['index']) + 1}"
-        if kind == "SeedsCaptured":
-            if int(data["index"]) < 0 or int(data["amount"]) == 0:
-                return "No capture (empty target)"
-            return f"Capture {data['amount']} from {int(data['index']) + 1}"
-        if kind == "ProtectedPitEncountered":
-            return f"Protected pit {int(data['index']) + 1}: drop or skip"
-        if kind == "ProtectedPitDropped":
-            return f"Drop into protected pit {int(data['index']) + 1}"
-        if kind == "ProtectedPitSkipped":
-            return f"Skip protected pit {int(data['index']) + 1}"
-        if kind == "OwnershipChanged":
-            return f"Pit {int(data['index']) + 1} transfers to P{int(data['owner']) + 1}"
-        if kind == "PitReclaimed":
-            return f"P{int(data['owner']) + 1} reclaims pit {int(data['index']) + 1}"
-        if kind == "CycleDetected":
-            if data.get("outcome") == "turn_ended":
-                return "Chosen path repeated; current turn ends"
-            return "Checkpoint repeated; round ends"
-        if kind == "LoopAvoidanceSelected":
-            return f"Try alternate {str(data['action']).title()}"
-        if kind == "PositionRepeated":
-            return "Position repeated; round ends"
-        if kind == "PitSelected":
-            return f"Select pit {int(data['index']) + 1}"
-        return kind.replace("_", " ")
 
     def _text(self, text: str, pos: tuple[int, int], font: pygame.font.Font, color: tuple[int, int, int]) -> None:
         self.screen.blit(font.render(text, True, color), pos)

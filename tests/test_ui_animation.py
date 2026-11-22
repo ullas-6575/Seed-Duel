@@ -1,5 +1,6 @@
 import os
 import unittest
+from unittest.mock import patch
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
@@ -7,7 +8,12 @@ import pygame
 
 from seed_duel.model import GameState, Phase
 from seed_duel.rules import apply_protected_choice, apply_select_pit
-from seed_duel.ui.app import BOARD_RECT, PLAYER_LABEL_POSITIONS, SeedDuelApp
+from seed_duel.ui.app import (
+    ACCOUNT_PIT_CENTERS,
+    BOARD_RECT,
+    PLAYER_LABEL_POSITIONS,
+    SeedDuelApp,
+)
 
 
 def later_loop_and_last_choice() -> tuple[GameState, GameState]:
@@ -42,6 +48,10 @@ class UiAnimationTests(unittest.TestCase):
 
         # Selection, two pickups, eight drops and one capture are animated.
         self.assertEqual(len(app.animation_steps), 12)
+        capture_step = app.animation_steps[-1]
+        self.assertEqual(capture_step.event.kind, "SeedsCaptured")
+        self.assertEqual(capture_step.source_index, 1)
+        self.assertGreater(capture_step.duration_ms, 360)
         for _ in range(30):
             app._advance_animation()
             if app.current_step:
@@ -51,6 +61,40 @@ class UiAnimationTests(unittest.TestCase):
                 break
 
         self.assertEqual(app.display_state, final)
+
+    def test_protected_pits_render_with_locks_and_chains(self) -> None:
+        app = SeedDuelApp()
+        app.display_state = app.state.evolve(
+            owners=(0, 0, 0, 1, 1, 1, 1, 1, 1, 1),
+            protected=(False, False, False, True, True, False, False, False, False, False),
+        )
+
+        app._draw_board()
+
+        first = app._pit_by_index(3).center
+        second = app._pit_by_index(4).center
+        midpoint = ((first[0] + second[0]) // 2, (first[1] + second[1]) // 2)
+        self.assertNotEqual(app.screen.get_at(midpoint)[:3], (207, 220, 196))
+
+    def test_captured_seeds_fly_into_the_acting_players_account_pit(self) -> None:
+        app = SeedDuelApp()
+        before = app.state
+        final, events = apply_select_pit(before, 0)
+        app.state = final
+        app._queue_turn_animation(before, final, events)
+        capture_step = app.animation_steps[-1]
+        app.current_step = capture_step
+        app.animation_steps = []
+        app.display_state = capture_step.before
+        app.step_started_at = pygame.time.get_ticks() - capture_step.duration_ms // 2
+
+        with patch.object(app, "_draw_seed_flight") as draw_flight:
+            app._draw_flying_seed()
+
+        self.assertTrue(draw_flight.called)
+        self.assertTrue(
+            all(call.args[1] == ACCOUNT_PIT_CENTERS[0] for call in draw_flight.call_args_list)
+        )
 
     def test_ai_executes_its_protected_skip_choice(self) -> None:
         app = SeedDuelApp()

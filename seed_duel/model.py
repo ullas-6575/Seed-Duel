@@ -44,7 +44,6 @@ class GameState:
     protected: tuple[bool, ...] = ()
     pending_protected: int | None = None
     round_positions: tuple[tuple[object, ...], ...] = ()
-    settled_positions: tuple[tuple[object, ...], ...] = ()
     turn_seen: tuple[tuple[object, ...], ...] = ()
     loop_resolution_available: bool = False
 
