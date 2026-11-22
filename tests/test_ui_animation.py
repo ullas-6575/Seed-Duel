@@ -211,6 +211,54 @@ class UiAnimationTests(unittest.TestCase):
         self.assertIsNone(app.advice)
         self.assertEqual(app.hints_remaining, [3, 3])
 
+    def test_sound_notifies_human_on_play_and_drop_skip_prompts(self) -> None:
+        app = SeedDuelApp()
+        played: list[str] = []
+
+        class FakeSound:
+            def __init__(self, label: str) -> None:
+                self.label = label
+
+            def play(self) -> None:
+                played.append(self.label)
+
+        app._sounds = {"play": FakeSound("play"), "drop_skip": FakeSound("drop_skip")}
+
+        # Starting a human game notifies the human player to play.
+        app._start_game(ai_level="easy")
+        self.assertEqual(played, ["play"])
+
+        # Finishing an animation into DROP_SKIP for a human plays the drop_skip chime.
+        protected_state = GameState(
+            pits=(4, 4, 4, 4, 4, 0, 4, 4, 4, 4),
+            player=0,
+            owners=(0, 0, 0, 0, 0, 0, 1, 1, 1, 1),
+            protected=(False, False, False, False, False, True, False, False, False, False),
+            captured=(4, 0),
+            initial_total=40,
+        )
+        pending, events = apply_select_pit(protected_state, 4, auto_protected=False)
+        self.assertIs(pending.phase, Phase.DROP_SKIP)
+        app.state = pending
+        app._queue_turn_animation(protected_state, pending, events)
+        while app.current_step or app.animation_steps:
+            app._advance_animation()
+            if app.current_step:
+                app.step_started_at = -10_000
+            app._advance_animation()
+        self.assertEqual(played, ["play", "drop_skip"])
+
+        # Muting via the sound toggle button suppresses sound playback.
+        app._handle_click(app.sound_rect.center)
+        self.assertFalse(app.sound_enabled)
+        app._notify_human_prompt("play")
+        self.assertEqual(played, ["play", "drop_skip"])
+
+        # AI vs AI does not trigger human turn notifications.
+        app.sound_enabled = True
+        app._start_game(ai_matchup=("greedy", "mcts"))
+        self.assertEqual(played, ["play", "drop_skip"])
+
 
 if __name__ == "__main__":
     unittest.main()
